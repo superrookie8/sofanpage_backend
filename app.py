@@ -5,6 +5,7 @@ from pymongo.mongo_client import MongoClient
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 from datetime import timedelta
+from bson import ObjectId
 
 import datetime
 import certifi
@@ -32,6 +33,7 @@ collection = db['guestbooks_collections']
 users = db['users']
 admins = db['admin']
 profiles = db['admin_profile']
+admin_stats = db['admin_stats']
 news = db['admin_news']
 schedules = db['admin_schedules']
 
@@ -166,8 +168,27 @@ def admin_create_or_update_profile():
         print(f"Error: {str(e)}")
         return jsonify({"status": "Failed to create or update profile", "error": str(e)}), 500
 
-@app.route('/api/admin/get/profile', methods=['GET'])
+
+
+@app.route('/api/admin/create_or_update/stats', methods=['POST'])
 @admin_required
+def create_update_stats():
+    try:
+        data = request.json
+        season = data.get("season")
+        stats_data = {
+            "season": season,
+            "average": data.get("average", {}),
+            "total": data.get("total", {})
+        }
+        # 시즌별로 데이터 업데이트 또는 생성
+        db.admin_stats.update_one({"season": season}, {"$set": stats_data}, upsert=True)
+        return jsonify({"status": "Stats created or updated"}), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"status": "Failed to create or update stats", "error": str(e)}), 500
+
+@app.route('/api/admin/get/profile', methods=['GET'])
 def get_profile():
     try:
         profile = profiles.find_one({}, {"_id": 0})  # 첫 번째 프로필을 가져옴, _id는 제외
@@ -177,6 +198,20 @@ def get_profile():
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"status": "Failed to get profile", "error": str(e)}), 500
+
+
+@app.route('/api/admin/get/stats', methods=['GET'])
+def get_stats():
+    try:
+        stats = list(db.admin_stats.find({}).sort("season", -1))
+        # _id 필드를 문자열로 변환
+        for stat in stats:
+            stat['_id'] = str(stat['_id'])
+        return jsonify(stats), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"status": "Failed to fetch stats", "error": str(e)}), 500
+
 
 
 @app.route('/api/admin/create/news', methods=['POST'])
