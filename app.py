@@ -251,49 +251,11 @@ def post_photo():
             file_id = fs_admin.put(photo, filename=unique_filename, photo_id=photo_id, upload_time=upload_time_dt)
             file_ids.append(str(file_id))
 
-            # Debug logging
-            print(f"Uploaded file: {filename}, unique filename: {unique_filename}, photo_id: {photo_id}, upload_time: {upload_time}")
-
-        print(f"Total files uploaded: {len(file_ids)}")
-
         return jsonify({'message': 'Photos uploaded successfully', 'file_ids': file_ids}), 200
 
     except Exception as e:
         print(f"Error: {e}")
         return jsonify({'message': 'Failed to upload photos', 'error': str(e)}), 500
-
-
-# @app.route('/api/admin/postphoto', methods=['POST'])
-# def post_photo():
-#     if 'Authorization' not in request.headers:
-#         return jsonify({'message': 'You are not authorized to perform this action.'}), 401
-
-#     try:
-#         photos = request.files.getlist('photos')
-#         photo_ids = request.form.getlist('photo_ids')
-#         upload_times = request.form.getlist('upload_times')
-
-#         if len(photos) != len(photo_ids) or len(photos) != len(upload_times):
-#             return jsonify({'message': 'Mismatched number of photos, photo_ids, and upload_times'}), 400
-
-#         file_ids = []
-#         for photo, photo_id, upload_time in zip(photos, photo_ids, upload_times):
-#             filename = secure_filename(photo.filename)
-#             unique_filename = f"{uuid.uuid4()}_{filename}"
-#             upload_time_dt = dt.strptime(upload_time, "%Y-%m-%dT%H:%M:%S.%fZ")
-#              # Save file to GridFS
-#             file_id = fs_admin.put(photo, filename=unique_filename, photo_id=photo_id, upload_time=upload_time_dt)
-#             file_ids.append(str(file_id))
-#             # 추가로 photo_id와 upload_time을 데이터베이스에 저장할 수 있습니다.
-
-
-#         return jsonify({'message': 'Photos uploaded successfully', 'file_ids': file_ids}), 200
-
-#     except Exception as e:
-#         print(f"Error: {e}")
-#         return jsonify({'message': 'Failed to upload photos', 'error': str(e)}), 500
-
-
 
 
 
