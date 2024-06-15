@@ -4,8 +4,10 @@ from flask_cors import CORS
 from pymongo.mongo_client import MongoClient
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
-from datetime import timedelta
+from datetime import timedelta, datetime as dt
 from bson import ObjectId
+import gridfs
+from werkzeug.utils import secure_filename
 
 import datetime
 import certifi
@@ -18,8 +20,17 @@ load_dotenv()
 
 ca = certifi.where()
 
+
 app = Flask(__name__)
 CORS(app)
+
+# 파일이 저장될 업로드 폴더 경로를 설정하고 생성합니다.
+UPLOAD_FOLDER = 'uploads'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
 
 #JWT 설정
 app.config["JWT_SECRET_KEY"]= os.getenv("JWT_SECRET_KEY")
@@ -29,6 +40,8 @@ jwt = JWTManager(app)
 
 client = MongoClient(os.getenv("MONGO_URI"),tlsCAFile=certifi.where() )
 db = client.fanpage
+fs_admin = gridfs.GridFS(db, collection='admin_photo')
+fs_user = gridfs.GridFS(db, collection='user_photo')
 collection = db['guestbooks_collections']
 users = db['users']
 admins = db['admin']
@@ -170,7 +183,7 @@ def admin_create_or_update_profile():
 
 
 
-@app.route('/api/admin/create_or_update/stats', methods=['POST'])
+@app.route('/api/admin/create_update_stats', methods=['POST'])
 @admin_required
 def create_update_stats():
     try:
@@ -178,15 +191,111 @@ def create_update_stats():
         season = data.get("season")
         stats_data = {
             "season": season,
-            "average": data.get("average", {}),
-            "total": data.get("total", {})
+            "average": {
+                "G": data["average"]["G"],
+                "MPG": data["average"]["MPG"],
+                "2P%": data["average"]["2P%"],
+                "3P%": data["average"]["3P%"],
+                "FT": data["average"]["FT"],
+                "OFF": data["average"]["OFF"],
+                "DEF": data["average"]["DEF"],
+                "TOT": data["average"]["TOT"],
+                "APG": data["average"]["APG"],
+                "SPG": data["average"]["SPG"],
+                "BPG": data["average"]["BPG"],
+                "TO": data["average"]["TO"],
+                "PF": data["average"]["PF"],
+                "PPG": data["average"]["PPG"]
+            },
+            "total": {
+                "MIN": data["total"]["MIN"],
+                "FGM-A": data["total"]["FGM-A"],
+                "3PM-A": data["total"]["3PM-A"],
+                "FTM-A": data["total"]["FTM-A"],
+                "OFF": data["total"]["OFF"],
+                "DEF": data["total"]["DEF"],
+                "TOT": data["total"]["TOT"],
+                "AST": data["total"]["AST"],
+                "STL": data["total"]["STL"],
+                "BLK": data["total"]["BLK"],
+                "TO": data["total"]["TO"],
+                "PF": data["total"]["PF"],
+                "PTS": data["total"]["PTS"]
+            }
         }
-        # 시즌별로 데이터 업데이트 또는 생성
         db.admin_stats.update_one({"season": season}, {"$set": stats_data}, upsert=True)
         return jsonify({"status": "Stats created or updated"}), 200
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"status": "Failed to create or update stats", "error": str(e)}), 500
+
+@app.route('/api/admin/postphoto', methods=['POST'])
+def post_photo():
+    if 'Authorization' not in request.headers:
+        return jsonify({'message': 'You are not authorized to perform this action.'}), 401
+
+    try:
+        photos = request.files.getlist('photos')
+        photo_ids = request.form.getlist('photo_ids')
+        upload_times = request.form.getlist('upload_times')
+
+        if len(photos) != len(photo_ids) or len(photos) != len(upload_times):
+            return jsonify({'message': 'Mismatched number of photos, photo_ids, and upload_times'}), 400
+
+        file_ids = []
+        for photo, photo_id, upload_time in zip(photos, photo_ids, upload_times):
+            filename = secure_filename(photo.filename)
+            unique_filename = f"{uuid.uuid4()}_{filename}"
+            upload_time_dt = datetime.datetime.strptime(upload_time, "%Y-%m-%dT%H:%M:%S.%fZ")
+            # Save file to GridFS
+            file_id = fs_admin.put(photo, filename=unique_filename, photo_id=photo_id, upload_time=upload_time_dt)
+            file_ids.append(str(file_id))
+
+            # Debug logging
+            print(f"Uploaded file: {filename}, unique filename: {unique_filename}, photo_id: {photo_id}, upload_time: {upload_time}")
+
+        print(f"Total files uploaded: {len(file_ids)}")
+
+        return jsonify({'message': 'Photos uploaded successfully', 'file_ids': file_ids}), 200
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({'message': 'Failed to upload photos', 'error': str(e)}), 500
+
+
+# @app.route('/api/admin/postphoto', methods=['POST'])
+# def post_photo():
+#     if 'Authorization' not in request.headers:
+#         return jsonify({'message': 'You are not authorized to perform this action.'}), 401
+
+#     try:
+#         photos = request.files.getlist('photos')
+#         photo_ids = request.form.getlist('photo_ids')
+#         upload_times = request.form.getlist('upload_times')
+
+#         if len(photos) != len(photo_ids) or len(photos) != len(upload_times):
+#             return jsonify({'message': 'Mismatched number of photos, photo_ids, and upload_times'}), 400
+
+#         file_ids = []
+#         for photo, photo_id, upload_time in zip(photos, photo_ids, upload_times):
+#             filename = secure_filename(photo.filename)
+#             unique_filename = f"{uuid.uuid4()}_{filename}"
+#             upload_time_dt = dt.strptime(upload_time, "%Y-%m-%dT%H:%M:%S.%fZ")
+#              # Save file to GridFS
+#             file_id = fs_admin.put(photo, filename=unique_filename, photo_id=photo_id, upload_time=upload_time_dt)
+#             file_ids.append(str(file_id))
+#             # 추가로 photo_id와 upload_time을 데이터베이스에 저장할 수 있습니다.
+
+
+#         return jsonify({'message': 'Photos uploaded successfully', 'file_ids': file_ids}), 200
+
+#     except Exception as e:
+#         print(f"Error: {e}")
+#         return jsonify({'message': 'Failed to upload photos', 'error': str(e)}), 500
+
+
+
+
 
 @app.route('/api/admin/get/profile', methods=['GET'])
 def get_profile():
@@ -203,7 +312,7 @@ def get_profile():
 @app.route('/api/admin/get/stats', methods=['GET'])
 def get_stats():
     try:
-        stats = list(db.admin_stats.find({}).sort("season", -1))
+        stats = list(db.admin_stats.find({}).sort([("season", -1)]))
         # _id 필드를 문자열로 변환
         for stat in stats:
             stat['_id'] = str(stat['_id'])
@@ -211,6 +320,19 @@ def get_stats():
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"status": "Failed to fetch stats", "error": str(e)}), 500
+
+
+@app.route('/api/admin/getphoto/<photo_id>', methods=['GET'])
+def get_photo(photo_id):
+    try:
+        file = fs.get(photo_id)
+        response = app.response_class(file.read(), content_type=file.content_type)
+        response.headers["Content-Disposition"] = f"attachment; filename={file.filename}"
+        return response
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"status": "Failed", "message": str(e)}), 500
 
 
 
