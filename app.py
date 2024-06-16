@@ -8,7 +8,7 @@ from datetime import timedelta, datetime as dt
 from bson import ObjectId
 import gridfs
 from werkzeug.utils import secure_filename
-
+import base64
 import datetime
 import certifi
 import re
@@ -230,32 +230,40 @@ def create_update_stats():
         return jsonify({"status": "Failed to create or update stats", "error": str(e)}), 500
 
 @app.route('/api/admin/postphoto', methods=['POST'])
+@jwt_required()
 def post_photo():
-    if 'Authorization' not in request.headers:
-        return jsonify({'message': 'You are not authorized to perform this action.'}), 401
-
     try:
-        photos = request.files.getlist('photos')
-        photo_ids = request.form.getlist('photo_ids')
-        upload_times = request.form.getlist('upload_times')
-
-        if len(photos) != len(photo_ids) or len(photos) != len(upload_times):
-            return jsonify({'message': 'Mismatched number of photos, photo_ids, and upload_times'}), 400
-
-        file_ids = []
-        for photo, photo_id, upload_time in zip(photos, photo_ids, upload_times):
-            filename = secure_filename(photo.filename)
-            unique_filename = f"{uuid.uuid4()}_{filename}"
-            upload_time_dt = datetime.datetime.strptime(upload_time, "%Y-%m-%dT%H:%M:%S.%fZ")
-            # Save file to GridFS
-            file_id = fs_admin.put(photo, filename=unique_filename, photo_id=photo_id, upload_time=upload_time_dt)
-            file_ids.append(str(file_id))
-
-        return jsonify({'message': 'Photos uploaded successfully', 'file_ids': file_ids}), 200
-
+        files = request.files.getlist("photos")
+        for file in files:
+            fs_admin.put(file, filename=file.filename, content_type=file.content_type)
+        return jsonify({"message": "Photos uploaded successfully"}), 200
     except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({'message': 'Failed to upload photos', 'error': str(e)}), 500
+        return jsonify({"message": str(e)}), 500
+
+
+@app.route('/api/admin/create/news', methods=['POST'])
+@admin_required
+def admin_create_news():
+    data = request.json
+    news_data = {
+        "title": data.get("title", ""),
+        "content": data.get("content", ""),
+        "date": datetime.datetime.utcnow()
+    }
+    news.insert_one(news_data)
+    return jsonify({"status": "News created"}), 200
+
+@app.route('/api/admin/create/schedule', methods=['POST'])
+@admin_required
+def admin_create_schedule():
+    data = request.json
+    schedule = {
+        "event": data.get("event", ""),
+        "date": data.get("date", ""),
+        "location": data.get("location", "")
+    }
+    schedules.insert_one(schedule)
+    return jsonify({"status": "Schedule created"}), 200        
 
 
 
@@ -284,43 +292,99 @@ def get_stats():
         return jsonify({"status": "Failed to fetch stats", "error": str(e)}), 500
 
 
-@app.route('/api/admin/getphoto/<photo_id>', methods=['GET'])
+@app.route('/api/admin/get/photo/<photo_id>', methods=['GET'])
+@jwt_required()
 def get_photo(photo_id):
     try:
-        file = fs.get(photo_id)
-        response = app.response_class(file.read(), content_type=file.content_type)
-        response.headers["Content-Disposition"] = f"attachment; filename={file.filename}"
+        # First, try to get the photo from the admin collection
+        try:
+            file = fs_admin.get(ObjectId(photo_id))
+        except gridfs.errors.NoFile:
+            # If not found in admin collection, try to get it from the user collection
+            file = fs_user.get(ObjectId(photo_id))
+
+        # Read the data from the file
+        data = file.read()
+
+        # Create a response with the image data
+        response = make_response(data)
+        response.headers.set('Content-Type', file.content_type)
+        response.headers.set('Content-Disposition', 'inline', filename=file.filename)
+        
         return response
 
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"status": "Failed", "message": str(e)}), 500
 
+@app.route('/api/admin/get/photos', methods=['GET'])
+@jwt_required()  # Ensure only authorized users can access this endpoint
+def get_photos():
+    try:
+        token = request.headers.get('Authorization').split()[1]
+        # Fetch photos from admin collection
+        admin_photos = fs_admin.find()
+        admin_photo_list = []
+        for photo in admin_photos:
+            # Read image data and encode in base64
+            image_data = fs_admin.get(photo._id).read()
+            base64_img = base64.b64encode(image_data).decode('utf-8')
+            data_url = f"data:image/jpeg;base64,{base64_img}"  # Assuming the image type is JPEG
+            admin_photo_list.append({
+                "_id": str(photo._id),
+                "filename": photo.filename,
+                "base64": data_url,
+                "url": f"/api/admin/get/photo/{photo._id}?token={token}"
+            })
+
+        # Fetch photos from user collection
+        user_photos = fs_user.find()
+        user_photo_list = []
+        for photo in user_photos:
+            # Read image data and encode in base64
+            image_data = fs_user.get(photo._id).read()
+            base64_img = base64.b64encode(image_data).decode('utf-8')
+            data_url = f"data:image/jpeg;base64,{base64_img}"  # Assuming the image type is JPEG
+            user_photo_list.append({
+                "_id": str(photo._id),
+                "filename": photo.filename,
+                "base64": data_url,
+                "url": f"/api/admin/get/photo/{photo._id}?token={token}"
+            })
+
+        return jsonify({"admin_photos": admin_photo_list, "user_photos": user_photo_list}), 200
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"status": "Failed", "message": str(e)}), 500
+
+@app.route('/api/admin/deletephoto', methods=['DELETE'])
+@jwt_required()
+def delete_photos():
+    try:
+        data = request.get_json()
+        photo_ids = data.get('photoIds', [])
+        
+        if not photo_ids:
+            return jsonify({"message": "No photo IDs provided"}), 400
+
+        for photo_id in photo_ids:
+            if fs_admin.exists({"_id": ObjectId(photo_id)}):
+                fs_admin.delete(ObjectId(photo_id))
+            elif fs_user.exists({"_id": ObjectId(photo_id)}):
+                fs_user.delete(ObjectId(photo_id))
+            else:
+                return jsonify({"message": f"Photo with ID {photo_id} does not exist"}), 404
+
+        return jsonify({"message": "Photos deleted successfully"}), 200
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({"message": "Failed to delete photos", "error": str(e)}), 500
 
 
-@app.route('/api/admin/create/news', methods=['POST'])
-@admin_required
-def admin_create_news():
-    data = request.json
-    news_data = {
-        "title": data.get("title", ""),
-        "content": data.get("content", ""),
-        "date": datetime.datetime.utcnow()
-    }
-    news.insert_one(news_data)
-    return jsonify({"status": "News created"}), 200
 
-@app.route('/api/admin/create/schedule', methods=['POST'])
-@admin_required
-def admin_create_schedule():
-    data = request.json
-    schedule = {
-        "event": data.get("event", ""),
-        "date": data.get("date", ""),
-        "location": data.get("location", "")
-    }
-    schedules.insert_one(schedule)
-    return jsonify({"status": "Schedule created"}), 200
+
 
 if __name__ == '__main__':
     app.run(debug=True)
