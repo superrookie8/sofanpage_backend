@@ -49,6 +49,7 @@ profiles = db['admin_profile']
 admin_stats = db['admin_stats']
 news = db['admin_news']
 schedules = db['admin_schedules']
+events = db['admin_events']
 
 
 
@@ -263,7 +264,55 @@ def admin_create_schedule():
         "location": data.get("location", "")
     }
     schedules.insert_one(schedule)
-    return jsonify({"status": "Schedule created"}), 200        
+    return jsonify({"status": "Schedule created"}), 200   
+
+
+@app.route('/api/admin/postevents', methods=['POST'])
+@jwt_required()
+def post_events():
+    try:
+        # 이벤트 데이터 추출
+        title = request.form.get('title', '')
+        url = request.form.get('url', '')
+        description = request.form.get('description', '')
+
+        # 체크 필드들을 동적으로 처리
+        check_fields = {}
+        for key in request.form.keys():
+            if key.startswith('check_'):
+                check_fields[key] = request.form.get(key, '')
+
+        event_data = {
+            "title": title,
+            "url": url,
+            "description": description,
+            "date": datetime.datetime.utcnow(),
+            **check_fields  # 체크 필드 추가
+        }
+
+        event_id = db.admin_events.insert_one(event_data).inserted_id
+
+        # 사진 파일 처리
+        files = request.files.getlist("photos")
+        photo_ids = []
+        for file in files:
+            file_id = fs_admin.put(file, filename=file.filename, content_type=file.content_type)
+            photo_ids.append(str(file_id))
+
+        # 이벤트 문서에 사진 파일 ID 추가
+        db.admin_events.update_one(
+            {"_id": event_id},
+            {"$set": {"photos": photo_ids}}
+        )
+
+        return jsonify({"message": "Event and photos uploaded successfully"}), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")  # 에러 메시지 출력
+        return jsonify({"message": str(e)}), 500
+
+
+
+
 
 
 
@@ -381,6 +430,170 @@ def delete_photos():
     except Exception as e:
         print(f"Error: {e}")
         return jsonify({"message": "Failed to delete photos", "error": str(e)}), 500
+
+@app.route('/api/get/photos/<photo_id>', methods=['GET'])
+def get_photo_public(photo_id):
+    try:
+        # First, try to get the photo from the admin collection
+        try:
+            file = fs_admin.get(ObjectId(photo_id))
+        except gridfs.errors.NoFile:
+            # If not found in admin collection, try to get it from the user collection
+            file = fs_user.get(ObjectId(photo_id))
+
+        # Read the data from the file
+        data = file.read()
+
+        # Create a response with the image data
+        response = make_response(data)
+        response.headers.set('Content-Type', file.content_type)
+        response.headers.set('Content-Disposition', 'inline', filename=file.filename)
+        
+        return response
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"status": "Failed", "message": str(e)}), 500
+
+
+@app.route('/api/get/photos', methods=['GET'])
+def get_photos_public():
+    try:
+        # Fetch photos from admin collection
+        admin_photos = fs_admin.find()
+        admin_photo_list = []
+        for photo in admin_photos:
+            # Read image data and encode in base64
+            image_data = fs_admin.get(photo._id).read()
+            base64_img = base64.b64encode(image_data).decode('utf-8')
+            data_url = f"data:image/jpeg;base64,{base64_img}"  # Assuming the image type is JPEG
+            admin_photo_list.append({
+                "_id": str(photo._id),
+                "filename": photo.filename,
+                "base64": data_url,
+                "url": f"/api/photos/{photo._id}"
+            })
+
+        # Fetch photos from user collection
+        user_photos = fs_user.find()
+        user_photo_list = []
+        for photo in user_photos:
+            # Read image data and encode in base64
+            image_data = fs_user.get(photo._id).read()
+            base64_img = base64.b64encode(image_data).decode('utf-8')
+            data_url = f"data:image/jpeg;base64,{base64_img}"  # Assuming the image type is JPEG
+            user_photo_list.append({
+                "_id": str(photo._id),
+                "filename": photo.filename,
+                "base64": data_url,
+                "url": f"/api/photos/{photo._id}"
+            })
+
+        return jsonify({"admin_photos": admin_photo_list, "user_photos": user_photo_list}), 200
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"status": "Failed", "message": str(e)}), 500
+
+
+@app.route('/api/admin/get/events', methods=['GET'])
+@jwt_required()
+def get_events():
+    try:
+        events = list(db.admin_events.find({}))
+        for event in events:
+            event["_id"] = str(event["_id"])  # ObjectId를 문자열로 변환
+            if "check_1" in event or "check_2" in event or "check_3" in event:
+                check_fields = {
+                    "check_1": event.get("check_1", ""),
+                    "check_2": event.get("check_2", ""),
+                    "check_3": event.get("check_3", "")
+                }
+                event["checkFields"] = check_fields
+
+            if "photos" in event:
+                photo_ids = event["photos"]
+                photos = []
+                for photo_id in photo_ids:
+                    try:
+                        photo_file = fs_admin.get(ObjectId(photo_id))
+                        photo_data = base64.b64encode(photo_file.read()).decode('utf-8')
+                        photos.append(f"data:{photo_file.content_type};base64,{photo_data}")
+                    except gridfs.errors.NoFile:
+                        continue
+                event["photos"] = photos
+            else:
+                event["photos"] = []
+
+        return jsonify({"events": events}), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
+
+
+
+
+@app.route('/api/admin/delete/eventphoto', methods=['DELETE'])
+@jwt_required()
+def delete_photo():
+    try:
+        data = request.get_json()
+        event_id = data['eventId']
+        photo_index = data['photoIndex']  # 수정된 부분
+
+        # 이벤트를 찾습니다.
+        event = db.admin_events.find_one({"_id": ObjectId(event_id)})
+        if not event:
+            return jsonify({"message": "Event not found"}), 404
+
+        # 사진 ID를 얻습니다.
+        photo_id = event['photos'][photo_index]
+
+        # GridFS에서 사진을 삭제합니다.
+        fs_admin.delete(ObjectId(photo_id))
+
+        # 이벤트에서 사진 ID를 제거합니다.
+        db.admin_events.update_one(
+            {"_id": ObjectId(event_id)},
+            {"$pull": {"photos": photo_id}}
+        )
+
+        return jsonify({"message": "Photo deleted successfully"}), 200
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
+
+
+
+@app.route('/api/admin/delete/event', methods=['DELETE'])
+@jwt_required()
+def delete_event():
+    try:
+        data = request.get_json()
+        event_id = data['eventId']
+
+        # 이벤트를 찾습니다.
+        event = db.admin_events.find_one({"_id": ObjectId(event_id)})
+        if not event:
+            return jsonify({"message": "Event not found"}), 404
+
+        # 이벤트 내 모든 사진을 삭제합니다.
+        if "photos" in event:
+            for photo_id in event["photos"]:
+                try:
+                    fs_admin.delete(ObjectId(photo_id))
+                except gridfs.errors.NoFile:
+                    continue
+
+        # 이벤트를 삭제합니다.
+        db.admin_events.delete_one({"_id": ObjectId(event_id)})
+
+        return jsonify({"message": "Event and its photos deleted successfully"}), 200
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
 
 
 
