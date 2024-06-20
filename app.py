@@ -42,6 +42,7 @@ client = MongoClient(os.getenv("MONGO_URI"),tlsCAFile=certifi.where() )
 db = client.fanpage
 fs_admin = gridfs.GridFS(db, collection='admin_photo')
 fs_user = gridfs.GridFS(db, collection='user_photo')
+fs_event = gridfs.GridFS(db, collection="event_photo")
 collection = db['guestbooks_collections']
 users = db['users']
 admins = db['admin']
@@ -123,7 +124,82 @@ def insert_data():
 def fetch_data():
     user_name = request.args.get('user', '하나')  # 쿼리 파라미터로 유저 이름 받기, 기본값 '하나'
     data = collection.find_one({"user": user_name})
-    return jsonify(data), 200        
+    return jsonify(data), 200     
+
+@app.route('/api/get/events', methods=['GET'])
+def get_events():
+    try:
+        events = list(db.admin_events.find({}))
+        for event in events:
+            event["_id"] = str(event["_id"])  # ObjectId를 문자열로 변환
+            if "check_1" in event or "check_2" in event or "check_3" in event:
+                check_fields = {
+                    "check_1": event.get("check_1", ""),
+                    "check_2": event.get("check_2", ""),
+                    "check_3": event.get("check_3", "")
+                }
+                event["checkFields"] = check_fields
+
+            if "photos" in event:
+                photo_ids = event["photos"]
+                photos = []
+                for photo_id in photo_ids:
+                    try:
+                        photo_file = fs_event.get(ObjectId(photo_id))
+                        photo_data = base64.b64encode(photo_file.read()).decode('utf-8')
+                        photos.append(f"data:{photo_file.content_type};base64,{photo_data}")
+                    except gridfs.errors.NoFile:
+                        continue
+                event["photos"] = photos
+            else:
+                event["photos"] = []
+
+        return jsonify({"events": events}), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500    
+
+
+@app.route('/api/get/photos', methods=['GET'])
+def get_photos_public():
+    try:
+        # Fetch photos from admin collection
+        admin_photos = fs_admin.find()
+        admin_photo_list = []
+        for photo in admin_photos:
+            # Read image data and encode in base64
+            image_data = fs_admin.get(photo._id).read()
+            base64_img = base64.b64encode(image_data).decode('utf-8')
+            data_url = f"data:image/jpeg;base64,{base64_img}"  # Assuming the image type is JPEG
+            admin_photo_list.append({
+                "_id": str(photo._id),
+                "filename": photo.filename,
+                "base64": data_url,
+                "url": f"/api/photos/{photo._id}"
+            })
+
+        # Fetch photos from user collection
+        user_photos = fs_user.find()
+        user_photo_list = []
+        for photo in user_photos:
+            # Read image data and encode in base64
+            image_data = fs_user.get(photo._id).read()
+            base64_img = base64.b64encode(image_data).decode('utf-8')
+            data_url = f"data:image/jpeg;base64,{base64_img}"  # Assuming the image type is JPEG
+            user_photo_list.append({
+                "_id": str(photo._id),
+                "filename": photo.filename,
+                "base64": data_url,
+                "url": f"/api/photos/{photo._id}"
+            })
+
+        return jsonify({"admin_photos": admin_photo_list, "user_photos": user_photo_list}), 200
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"status": "Failed", "message": str(e)}), 500
+
+          
 
 # 관리자 전용 엔드포인트
 @app.route('/api/admin/login', methods=['POST'])
@@ -296,7 +372,7 @@ def post_events():
         files = request.files.getlist("photos")
         photo_ids = []
         for file in files:
-            file_id = fs_admin.put(file, filename=file.filename, content_type=file.content_type)
+            file_id = fs_event.put(file, filename=file.filename, content_type=file.content_type)
             photo_ids.append(str(file_id))
 
         # 이벤트 문서에 사진 파일 ID 추가
@@ -309,6 +385,7 @@ def post_events():
     except Exception as e:
         print(f"Error: {str(e)}")  # 에러 메시지 출력
         return jsonify({"message": str(e)}), 500
+
 
 
 
@@ -456,49 +533,10 @@ def get_photo_public(photo_id):
         return jsonify({"status": "Failed", "message": str(e)}), 500
 
 
-@app.route('/api/get/photos', methods=['GET'])
-def get_photos_public():
-    try:
-        # Fetch photos from admin collection
-        admin_photos = fs_admin.find()
-        admin_photo_list = []
-        for photo in admin_photos:
-            # Read image data and encode in base64
-            image_data = fs_admin.get(photo._id).read()
-            base64_img = base64.b64encode(image_data).decode('utf-8')
-            data_url = f"data:image/jpeg;base64,{base64_img}"  # Assuming the image type is JPEG
-            admin_photo_list.append({
-                "_id": str(photo._id),
-                "filename": photo.filename,
-                "base64": data_url,
-                "url": f"/api/photos/{photo._id}"
-            })
-
-        # Fetch photos from user collection
-        user_photos = fs_user.find()
-        user_photo_list = []
-        for photo in user_photos:
-            # Read image data and encode in base64
-            image_data = fs_user.get(photo._id).read()
-            base64_img = base64.b64encode(image_data).decode('utf-8')
-            data_url = f"data:image/jpeg;base64,{base64_img}"  # Assuming the image type is JPEG
-            user_photo_list.append({
-                "_id": str(photo._id),
-                "filename": photo.filename,
-                "base64": data_url,
-                "url": f"/api/photos/{photo._id}"
-            })
-
-        return jsonify({"admin_photos": admin_photo_list, "user_photos": user_photo_list}), 200
-
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"status": "Failed", "message": str(e)}), 500
-
 
 @app.route('/api/admin/get/events', methods=['GET'])
 @jwt_required()
-def get_events():
+def get_admin_events():
     try:
         events = list(db.admin_events.find({}))
         for event in events:
@@ -506,7 +544,8 @@ def get_events():
             if "check_1" in event or "check_2" in event or "check_3" in event:
                 check_fields = {
                     "check_1": event.get("check_1", ""),
-                    "check_2": event.get("check_2", ""),
+                    "check_2":
+                event.get("check_2", ""),
                     "check_3": event.get("check_3", "")
                 }
                 event["checkFields"] = check_fields
@@ -516,7 +555,7 @@ def get_events():
                 photos = []
                 for photo_id in photo_ids:
                     try:
-                        photo_file = fs_admin.get(ObjectId(photo_id))
+                        photo_file = fs_event.get(ObjectId(photo_id))
                         photo_data = base64.b64encode(photo_file.read()).decode('utf-8')
                         photos.append(f"data:{photo_file.content_type};base64,{photo_data}")
                     except gridfs.errors.NoFile:
@@ -529,6 +568,9 @@ def get_events():
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
+
+
+
 
 
 
@@ -550,7 +592,7 @@ def delete_photo():
         photo_id = event['photos'][photo_index]
 
         # GridFS에서 사진을 삭제합니다.
-        fs_admin.delete(ObjectId(photo_id))
+        fs_event.delete(ObjectId(photo_id))
 
         # 이벤트에서 사진 ID를 제거합니다.
         db.admin_events.update_one(
@@ -563,6 +605,7 @@ def delete_photo():
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
+
 
 
 
@@ -582,7 +625,7 @@ def delete_event():
         if "photos" in event:
             for photo_id in event["photos"]:
                 try:
-                    fs_admin.delete(ObjectId(photo_id))
+                    fs_event.delete(ObjectId(photo_id))
                 except gridfs.errors.NoFile:
                     continue
 
@@ -594,7 +637,6 @@ def delete_event():
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
-
 
 
 
