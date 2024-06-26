@@ -14,6 +14,7 @@ import certifi
 import re
 import uuid
 
+
 import os
 
 load_dotenv()
@@ -24,12 +25,12 @@ ca = certifi.where()
 app = Flask(__name__)
 CORS(app)
 
-# 파일이 저장될 업로드 폴더 경로를 설정하고 생성합니다.
-UPLOAD_FOLDER = 'uploads'
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+# # 파일이 저장될 업로드 폴더 경로를 설정하고 생성합니다.
+# UPLOAD_FOLDER = 'uploads'
+# if not os.path.exists(UPLOAD_FOLDER):
+#     os.makedirs(UPLOAD_FOLDER)
 
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 
 #JWT 설정
@@ -51,6 +52,8 @@ admin_stats = db['admin_stats']
 news = db['admin_news']
 schedules = db['admin_schedules']
 events = db['admin_events']
+
+
 
 
 
@@ -330,17 +333,7 @@ def admin_create_news():
     news.insert_one(news_data)
     return jsonify({"status": "News created"}), 200
 
-@app.route('/api/admin/create/schedule', methods=['POST'])
-@admin_required
-def admin_create_schedule():
-    data = request.json
-    schedule = {
-        "event": data.get("event", ""),
-        "date": data.get("date", ""),
-        "location": data.get("location", "")
-    }
-    schedules.insert_one(schedule)
-    return jsonify({"status": "Schedule created"}), 200   
+
 
 
 @app.route('/api/admin/postevents', methods=['POST'])
@@ -638,6 +631,73 @@ def delete_event():
         print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
 
+
+@app.route('/api/admin/get/seasons', methods=['GET'])
+@admin_required
+def get_seasons():
+    try:
+        seasons = schedules.distinct("season")
+        return jsonify(seasons), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500        
+
+@app.route('/api/admin/create_update/schedule', methods=['POST'])
+@admin_required
+def create_or_update_schedule():
+    try:
+        data = request.json
+        print("Received data:", data)
+        schedule_id = data.get("_id")
+        schedule_data = {
+            "date": data.get("date", ""),
+            "opponent": data.get("opponent", ""),
+            "isHome": data.get("isHome", False),
+            "time": data.get("time", ""),
+            "season": data.get("season", "")
+        }
+
+        # Check if extraHome is in data and not an empty string
+        if data.get("extraHome"):
+            schedule_data["extraHome"] = data["extraHome"]
+
+        if schedule_id:
+            schedules.update_one({"_id": ObjectId(schedule_id)}, {"$set": schedule_data})
+            message = "Schedule updated"
+        else:
+            schedule_data["_id"] = ObjectId()  # 새로운 ObjectId 생성
+            schedules.insert_one(schedule_data)
+            message = "Schedule created"
+        
+        return jsonify({"status": message}), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
+
+
+
+
+@app.route('/api/admin/get/schedule', methods=['GET'])
+def get_schedules():
+    try:
+        season = request.args.get("season")
+        print(f"Received season: {season}") 
+        schedule_list = list(schedules.find({"season": season}).sort("date", 1))
+        for schedule in schedule_list:
+            schedule["_id"] = str(schedule["_id"])
+        return jsonify(schedule_list), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/admin/delete/schedule', methods=['DELETE'])
+@admin_required
+def delete_schedule():
+    try:
+        data = request.json
+        schedule_id = data.get("_id")
+        schedules.delete_one({"_id": ObjectId(schedule_id)})
+        return jsonify({"status": "Schedule deleted"}), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
 
 
 
