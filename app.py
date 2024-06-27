@@ -46,6 +46,7 @@ fs_user = gridfs.GridFS(db, collection='user_photo')
 fs_event = gridfs.GridFS(db, collection="event_photo")
 collection = db['guestbooks_collections']
 users = db['users']
+guestbooks =db['guestbooks']
 admins = db['admin']
 profiles = db['admin_profile']
 admin_stats = db['admin_stats']
@@ -201,6 +202,66 @@ def get_photos_public():
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"status": "Failed", "message": str(e)}), 500
+
+
+@app.route('/api/get_schedules', methods=['GET'])
+def get_user_schedules():
+    try:
+        schedule_list = []
+        for schedule in schedules.find():
+            schedule['_id'] = str(schedule['_id'])
+            schedule_list.append(schedule)
+        return jsonify(schedule_list), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")  # 디버깅용 로그
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/user_info', methods=['GET'])
+@jwt_required()
+def user_info():
+    current_user = get_jwt_identity()
+    user = users.find_one({"nickname": current_user}, {"_id": 0, "password": 0})  # 비밀번호를 제외한 사용자 정보
+    if user:
+        return jsonify(user), 200
+    else:
+        return jsonify({"msg": "User not found"}), 404        
+
+@app.route('/api/post_guestbook', methods=['POST'])
+def post_guestbook():
+    try:
+        data = request.json
+    
+        # 데이터 유효성 검사
+        if not data.get("name") or not data.get("message"):
+            return jsonify({"message": "Name and message are required"}), 400
+
+        guestbook_entry = {
+            "name": data.get("name", ""),
+            "message": data.get("message", ""),
+            "photo": data.get("photo", ""),
+            "date": data.get("date", "")
+        }
+        guestbooks.insert_one(guestbook_entry)
+        return jsonify({"status": "Guestbook entry added"}), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
+
+
+@app.route('/api/get_guestbook_entries', methods=['GET'])
+def get_guestbook_entries():
+    try:
+        entries = guestbooks.find()
+        entry_list = []
+        for entry in entries:
+            entry['_id'] = str(entry['_id'])
+            entry_list.append(entry)
+        return jsonify(entry_list), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+
+
 
           
 
