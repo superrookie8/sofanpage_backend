@@ -13,6 +13,8 @@ import datetime
 import certifi
 import re
 import uuid
+import io
+from PIL import Image
 
 
 import os
@@ -44,6 +46,7 @@ db = client.fanpage
 fs_admin = gridfs.GridFS(db, collection='admin_photo')
 fs_user = gridfs.GridFS(db, collection='user_photo')
 fs_event = gridfs.GridFS(db, collection="event_photo")
+fs_guestbooks = gridfs.GridFS(db, collection="guestbooks_photo")
 collection = db['guestbooks_collections']
 users = db['users']
 guestbooks =db['guestbooks']
@@ -226,27 +229,36 @@ def user_info():
     else:
         return jsonify({"msg": "User not found"}), 404        
 
+
 @app.route('/api/post_guestbook', methods=['POST'])
 def post_guestbook():
     try:
-        data = request.json
-    
-        # 데이터 유효성 검사
-        if not data.get("name") or not data.get("message"):
+        # 데이터 추출
+        name = request.form.get('name', '')
+        message = request.form.get('message', '')
+        date = request.form.get('date', '')
+
+        if not name or not message:
             return jsonify({"message": "Name and message are required"}), 400
 
+        # guestbooks 데이터베이스에 저장할 데이터
         guestbook_entry = {
-            "name": data.get("name", ""),
-            "message": data.get("message", ""),
-            "photo": data.get("photo", ""),
-            "date": data.get("date", "")
+            "name": name,
+            "message": message,
+            "date": date
         }
+
+        # 사진 처리
+        photo = request.files.get('photo')
+        if photo:
+            photo_id = fs_guestbooks.put(photo, filename=f"{name}_photo.jpg")
+            guestbook_entry["photo_id"] = str(photo_id)
+
         guestbooks.insert_one(guestbook_entry)
         return jsonify({"status": "Guestbook entry added"}), 200
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Error: {str(e)}")  # 에러 메시지 출력
         return jsonify({"message": str(e)}), 500
-
 
 @app.route('/api/get_guestbook_entries', methods=['GET'])
 def get_guestbook_entries():
@@ -255,11 +267,27 @@ def get_guestbook_entries():
         entry_list = []
         for entry in entries:
             entry['_id'] = str(entry['_id'])
+            if entry.get('photo_id'):
+                photo = fs_guestbooks.get(ObjectId(entry['photo_id']))
+                photo_data = base64.b64encode(photo.read()).decode('utf-8')
+                entry['photo_data'] = photo_data
             entry_list.append(entry)
         return jsonify(entry_list), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
+@app.route('/api/get_guestbook_photo/<photo_id>', methods=['GET'])
+def get_guestbook_photo(photo_id):
+    try:
+        photo = fs_guestbooks.get(ObjectId(photo_id))
+        data = photo.read()
+        response = make_response(data)
+        response.headers.set('Content-Type', photo.content_type)
+        response.headers.set('Content-Disposition', 'inline', filename=photo.filename)
+        return response
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"status": "Failed", "message": str(e)}), 500
 
 
 
