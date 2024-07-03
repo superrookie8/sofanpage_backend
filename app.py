@@ -13,7 +13,7 @@ import datetime
 import certifi
 import re
 import uuid
-import io
+from io import BytesIO
 from PIL import Image
 
 
@@ -26,13 +26,6 @@ ca = certifi.where()
 
 app = Flask(__name__)
 CORS(app)
-
-# # 파일이 저장될 업로드 폴더 경로를 설정하고 생성합니다.
-# UPLOAD_FOLDER = 'uploads'
-# if not os.path.exists(UPLOAD_FOLDER):
-#     os.makedirs(UPLOAD_FOLDER)
-
-# app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 
 #JWT 설정
@@ -74,24 +67,31 @@ def validate_password(password):
     return True       
 
 
-@app.route ('/api/sign_up', methods=['POST'])
-def sign_up() :
+@app.route('/api/sign_up', methods=['POST'])
+def sign_up():
     nickname = request.json.get('nickname', None)
     password = request.json.get('password', None)
     passwordConfirm = request.json.get('passwordConfirm', None)
 
     if not validate_password(password):
-        return jsonify({"msg":"비밀번호는 특수문자를 포함한 8-16자 입니다"})
+        return jsonify({"msg": "비밀번호는 특수문자를 포함한 8-16자 입니다"}), 400
 
     if password != passwordConfirm:
         return jsonify({"msg": "비밀번호가 맞지 않습니다"}), 400
 
     if users.find_one({"nickname": nickname}):
-        return jsonify({"msg":"이미 존재하는 닉네임입니다"}), 409
+        return jsonify({"msg": "이미 존재하는 닉네임입니다"}), 409
 
     hashed_password = generate_password_hash(password)
-    users.insert_one({"nickname": nickname, "password" : hashed_password})        
-    return jsonify({"msg" : "환영합니다!"}), 201
+    user_id = users.insert_one({
+        "nickname": nickname,
+        "password": hashed_password,
+        "description": "",  # 초기 가입 시 description을 빈 문자열로 설정
+        "photo": ""  # 초기 가입 시 photo를 빈 문자열로 설정
+    }).inserted_id
+
+    return jsonify({"msg": "환영합니다!"}), 201
+
 
 @app.route ('/api/login', methods = ['POST'])
 def login() :
@@ -115,23 +115,75 @@ def nickname_check():
     else:
         return jsonify({"msg": "가능한 닉네임입니다"}), 200
 
+@app.route('/api/put/userinfo', methods=['PUT'])
+@jwt_required()
+def update_profile():
+    try:
+        nickname = get_jwt_identity()
+        user = users.find_one({"nickname": nickname})
+        if not user:
+            return jsonify({"message": "User not found"}), 404
 
-@app.route('/api/create', methods=['POST'])
-def insert_data():
-    data = request.json
-    post = {
-        "nickname": data.get("nickname", "Anonymous"),  # 기본값으로 "Anonymous" 설정
-        "text": data.get("text", ""),
-        "date": datetime.datetime.utcnow()
-    }
-    collection.insert_one(post)
-    return jsonify({"status": "Data inserted"}), 200
+        description = request.form.get("description")
+        photo = request.files.get("photo")
 
-@app.route('/api/fetch')
-def fetch_data():
-    user_name = request.args.get('user', '하나')  # 쿼리 파라미터로 유저 이름 받기, 기본값 '하나'
-    data = collection.find_one({"user": user_name})
-    return jsonify(data), 200     
+        update_data = {}
+
+        if description:
+            update_data["description"] = description
+        if photo:
+            # Save the new photo to GridFS
+            photo_id = fs_user.put(photo, filename=f"{nickname}_profile_photo.jpg")
+            update_data["photo"] = f"/api/photo/{photo_id}"
+
+        if not update_data:
+            return jsonify({"message": "No data to update"}), 400
+
+        users.update_one({"_id": user['_id']}, {"$set": update_data})
+
+        return jsonify(update_data), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")  # 에러 메시지 출력
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/get/userinfo', methods=['GET'])
+@jwt_required()
+def get_user_info():
+    try:
+        nickname = get_jwt_identity()
+        user = users.find_one({"nickname": nickname})
+        if not user:
+            return jsonify({"message": "User not found"}), 404
+
+        user_info = {
+            "nickname": user.get("nickname", ""),
+            "description": user.get("description", ""),
+            "photoUrl": ""
+        }
+
+        if "photo" in user:
+            try:
+                photo_file = fs_user.get(ObjectId(user["photo"].split('/')[-1]))
+                
+                # 이미지를 압축하여 크기 줄이기
+                image = Image.open(photo_file)
+                if image.mode == 'RGBA':
+                    image = image.convert('RGB')  # RGBA 모드를 RGB로 변환
+                buffered = BytesIO()
+                image.save(buffered, format="JPEG", quality=50)  # 품질을 조절하여 압축
+                photo_data = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+                user_info["photoUrl"] = f"data:{photo_file.content_type};base64,{photo_data}"
+            except gridfs.errors.NoFile:
+                user_info["photoUrl"] = ""
+
+        return jsonify(user_info), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
+
+
+   
 
 @app.route('/api/get/events', methods=['GET'])
 def get_events():
@@ -219,15 +271,6 @@ def get_user_schedules():
         print(f"Error: {str(e)}")  # 디버깅용 로그
         return jsonify({"message": str(e)}), 500
 
-@app.route('/api/user_info', methods=['GET'])
-@jwt_required()
-def user_info():
-    current_user = get_jwt_identity()
-    user = users.find_one({"nickname": current_user}, {"_id": 0, "password": 0})  # 비밀번호를 제외한 사용자 정보
-    if user:
-        return jsonify(user), 200
-    else:
-        return jsonify({"msg": "User not found"}), 404        
 
 
 @app.route('/api/post_guestbook', methods=['POST'])
@@ -266,8 +309,13 @@ def get_guestbook_entries():
         page = int(request.args.get('page', 1))
         page_size = int(request.args.get('page_size', 10))
         skip = (page - 1) * page_size
+        user = request.args.get('user', None)
 
-        entries = guestbooks.find().sort('date', -1).skip(skip).limit(page_size)
+        query = {}
+        if user:
+            query['name'] = user
+
+        entries = guestbooks.find(query).sort('date', -1).skip(skip).limit(page_size)
         entry_list = []
         for entry in entries:
             entry['_id'] = str(entry['_id'])
@@ -277,10 +325,11 @@ def get_guestbook_entries():
                 entry['photo_data'] = photo_data
             entry_list.append(entry)
 
-        total_entries = guestbooks.count_documents({})
+        total_entries = guestbooks.count_documents(query)
         return jsonify({"entries": entry_list, "total_entries": total_entries}), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
+
 
 @app.route('/api/get_guestbook_photo/<photo_id>', methods=['GET'])
 def get_guestbook_photo(photo_id):
@@ -294,6 +343,31 @@ def get_guestbook_photo(photo_id):
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"status": "Failed", "message": str(e)}), 500
+
+@app.route('/api/delete/guestbook', methods=['DELETE'])
+@jwt_required()
+def delete_guestbook():
+    try:
+        nickname = get_jwt_identity()
+        entry_id = request.args.get('entry_id')
+
+        if not entry_id:
+            return jsonify({"message": "Entry ID is required"}), 400
+
+        guestbook_entry = guestbooks.find_one({"_id": ObjectId(entry_id), "name": nickname})
+
+        if not guestbook_entry:
+            return jsonify({"message": "Guestbook entry not found or you do not have permission to delete this entry"}), 404
+
+        if "photo_id" in guestbook_entry:
+            fs_guestbooks.delete(ObjectId(guestbook_entry["photo_id"]))
+
+        guestbooks.delete_one({"_id": ObjectId(entry_id)})
+
+        return jsonify({"message": "Guestbook entry deleted successfully"}), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
 
 
 
@@ -800,9 +874,14 @@ def get_admin_guestbook_entries():
     try:
         page = int(request.args.get('page', 1))
         page_size = int(request.args.get('page_size', 10))
+        name_filter = request.args.get('name', None)
         skip = (page - 1) * page_size
 
-        entries = guestbooks.find().sort('date', -1).skip(skip).limit(page_size)
+        query = {}
+        if name_filter:
+            query['name'] = name_filter
+
+        entries = guestbooks.find(query).sort('name', 1).skip(skip).limit(page_size)
         entry_list = []
         for entry in entries:
             entry['_id'] = str(entry['_id'])
@@ -812,7 +891,7 @@ def get_admin_guestbook_entries():
                 entry['photo_data'] = photo_data
             entry_list.append(entry)
 
-        total_entries = guestbooks.count_documents({})
+        total_entries = guestbooks.count_documents(query)
         return jsonify({"entries": entry_list, "total_entries": total_entries}), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
@@ -831,9 +910,13 @@ def get_admin_guestbook_photo(photo_id):
         print(f"Error: {str(e)}")
         return jsonify({"status": "Failed", "message": str(e)}), 500      
 
-@app.route('/api/admin/delete_guestbook_entry/<entry_id>', methods=['DELETE'])
+@app.route('/api/admin/delete_guestbook_entry/<entry_id>', methods=['DELETE', 'OPTIONS'])
 @admin_required
 def delete_admin_guestbook_entry(entry_id):
+    if request.method == 'OPTIONS':
+        # 프리플라이트 요청에 대한 응답
+        return jsonify({"message": "CORS preflight request successful"}), 200
+
     try:
         entry = guestbooks.find_one({"_id": ObjectId(entry_id)})
         if not entry:
@@ -848,7 +931,8 @@ def delete_admin_guestbook_entry(entry_id):
 
         return jsonify({"message": "Entry deleted successfully"}), 200
     except Exception as e:
-        return jsonify({"message": str(e)}), 500        
+        return jsonify({"message": str(e)}), 500
+   
 
 
 
