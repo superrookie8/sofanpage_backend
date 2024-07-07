@@ -182,41 +182,84 @@ def get_user_info():
         print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
 
-
-   
-
-@app.route('/api/get/events', methods=['GET'])
-def get_events():
+@app.route('/api/get/event-list', methods=['GET'])
+def get_event_list():
     try:
-        events = list(db.admin_events.find({}))
+        events = list(db.admin_events.find({}, {"_id": 1, "title": 1}))
         for event in events:
-            event["_id"] = str(event["_id"])  # ObjectId를 문자열로 변환
-            if "check_1" in event or "check_2" in event or "check_3" in event:
-                check_fields = {
-                    "check_1": event.get("check_1", ""),
-                    "check_2": event.get("check_2", ""),
-                    "check_3": event.get("check_3", "")
-                }
-                event["checkFields"] = check_fields
-
-            if "photos" in event:
-                photo_ids = event["photos"]
-                photos = []
-                for photo_id in photo_ids:
-                    try:
-                        photo_file = fs_event.get(ObjectId(photo_id))
-                        photo_data = base64.b64encode(photo_file.read()).decode('utf-8')
-                        photos.append(f"data:{photo_file.content_type};base64,{photo_data}")
-                    except gridfs.errors.NoFile:
-                        continue
-                event["photos"] = photos
-            else:
-                event["photos"] = []
-
+            event["_id"] = str(event["_id"])
         return jsonify({"events": events}), 200
     except Exception as e:
         print(f"Error: {str(e)}")
-        return jsonify({"message": str(e)}), 500    
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/get/event-detail/<event_id>', methods=['GET'])
+def get_event_detail(event_id):
+    try:
+        event = db.admin_events.find_one({"_id": ObjectId(event_id)})
+        if event:
+            event["_id"] = str(event["_id"])
+            check_fields = {
+                "check_1": event.get("check_1", ""),
+                "check_2": event.get("check_2", ""),
+                "check_3": event.get("check_3", "")
+            }
+            event["checkFields"] = check_fields
+            event["photos"] = []  # 사진 필드는 비워둡니다.
+
+            return jsonify({"event": event}), 200
+        else:
+            return jsonify({"message": "Event not found"}), 404
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
+
+
+@app.route('/api/get/event-photos/<event_id>', methods=['GET'])
+def get_event_photos(event_id):
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 5))
+
+        event = db.admin_events.find_one({"_id": ObjectId(event_id)})
+        if event and "photos" in event:
+            photo_ids = event["photos"]
+            total_photos = len(photo_ids)
+            start = (page - 1) * page_size
+            end = start + page_size
+
+            photos = []
+            for photo_id in photo_ids[start:end]:
+                try:
+                    photo_file = fs_event.get(ObjectId(photo_id))
+                    photo_data = base64.b64encode(photo_file.read()).decode('utf-8')
+                    photos.append(f"data:{photo_file.content_type};base64,{photo_data}")
+                except gridfs.errors.NoFile:
+                    continue
+
+            total_pages = (total_photos + page_size - 1) // page_size
+
+            return jsonify({
+                "photos": photos,
+                "total_photos": total_photos,
+                "total_pages": total_pages,
+                "page": page,
+                "page_size": page_size
+            }), 200
+        else:
+            return jsonify({
+                "photos": [],
+                "total_photos": 0,
+                "total_pages": 0,
+                "page": 1,
+                "page_size": page_size
+            }), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
+
+
+   
 
 
 @app.route('/api/get/photos', methods=['GET'])
