@@ -360,29 +360,26 @@ def post_guestbook():
 @app.route('/api/get_guestbook_entries', methods=['GET'])
 def get_guestbook_entries():
     try:
-        page = int(request.args.get('page', 1))
-        page_size = int(request.args.get('page_size', 10))
-        skip = (page - 1) * page_size
-        user = request.args.get('user', None)
+        # Fetching all entries regardless of pagination
+        entries = guestbooks.find().sort('date', -1)
+        photo_entries = []
+        no_photo_entries = []
 
-        query = {}
-        if user:
-            query['name'] = user
-
-        entries = guestbooks.find(query).sort('date', -1).skip(skip).limit(page_size)
-        entry_list = []
         for entry in entries:
             entry['_id'] = str(entry['_id'])
             if entry.get('photo_id'):
                 photo = fs_guestbooks.get(ObjectId(entry['photo_id']))
                 photo_data = base64.b64encode(photo.read()).decode('utf-8')
                 entry['photo_data'] = photo_data
-            entry_list.append(entry)
+                photo_entries.append(entry)
+            else:
+                no_photo_entries.append(entry)
 
-        total_entries = guestbooks.count_documents(query)
-        return jsonify({"entries": entry_list, "total_entries": total_entries}), 200
+        return jsonify({"photo_entries": photo_entries, "no_photo_entries": no_photo_entries}), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
+
+
 
 
 @app.route('/api/get_guestbook_photo/<photo_id>', methods=['GET'])
@@ -423,7 +420,32 @@ def delete_guestbook():
         print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
 
+@app.route('/api/get_user_guestbook_entries', methods=['GET'])
+def get_user_guestbook_entries():
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 10))
+        skip = (page - 1) * page_size
+        user = request.args.get('user', None)
 
+        query = {}
+        if user:
+            query['name'] = user
+
+        entries = guestbooks.find(query).sort('date', -1).skip(skip).limit(page_size)
+        entry_list = []
+        for entry in entries:
+            entry['_id'] = str(entry['_id'])
+            if entry.get('photo_id'):
+                photo = fs_guestbooks.get(ObjectId(entry['photo_id']))
+                photo_data = base64.b64encode(photo.read()).decode('utf-8')
+                entry['photo_data'] = photo_data
+            entry_list.append(entry)
+
+        total_entries = guestbooks.count_documents(query)
+        return jsonify({"entries": entry_list, "total_entries": total_entries}), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
 
           
 
