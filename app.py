@@ -15,6 +15,8 @@ import re
 import uuid
 from io import BytesIO
 from PIL import Image
+import gridfs.errors
+import logging
 
 
 import os
@@ -22,6 +24,10 @@ import os
 load_dotenv()
 
 ca = certifi.where()
+
+# 로깅 설정
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 
 app = Flask(__name__)
@@ -143,8 +149,10 @@ def update_profile():
 
         return jsonify(update_data), 200
     except Exception as e:
-        print(f"Error: {str(e)}")  # 에러 메시지 출력
+        print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
+
+
 
 @app.route('/api/get/userinfo', methods=['GET'])
 @jwt_required()
@@ -153,6 +161,7 @@ def get_user_info():
         nickname = get_jwt_identity()
         user = users.find_one({"nickname": nickname})
         if not user:
+            logger.debug("User not found")
             return jsonify({"message": "User not found"}), 404
 
         user_info = {
@@ -161,26 +170,40 @@ def get_user_info():
             "photoUrl": ""
         }
 
-        if "photo" in user:
+        logger.debug(f"User found: {user}")  # 유저 정보 로그 추가
+
+        if "photo" in user and user["photo"]:
             try:
-                photo_file = fs_user.get(ObjectId(user["photo"].split('/')[-1]))
-                
-                # 이미지를 압축하여 크기 줄이기
+                logger.debug(f"Photo path: {user['photo']}")  # 로그 추가
+                photo_id_str = user["photo"].split('/')[-1]
+                logger.debug(f"Photo ID: {photo_id_str}")  # 로그 추가
+                photo_id = ObjectId(photo_id_str)
+                photo_file = fs_user.get(photo_id)
+
+                logger.debug(f"Photo file: {photo_file}")  # 사진 파일 로그 추가
+
                 image = Image.open(photo_file)
                 if image.mode == 'RGBA':
-                    image = image.convert('RGB')  # RGBA 모드를 RGB로 변환
+                    image = image.convert('RGB')
                 buffered = BytesIO()
-                image.save(buffered, format="JPEG", quality=50)  # 품질을 조절하여 압축
+                image.save(buffered, format="JPEG", quality=50)
                 photo_data = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-                user_info["photoUrl"] = f"data:{photo_file.content_type};base64,{photo_data}"
+                user_info["photoUrl"] = f"data:image/jpeg;base64,{photo_data}"
             except gridfs.errors.NoFile:
                 user_info["photoUrl"] = ""
+                logger.debug("NoFile error: Photo not found in GridFS")  # 로그 추가
+            except Exception as e:
+                logger.debug(f"Error processing image: {str(e)}")
+                user_info["photoUrl"] = ""
 
+        logger.debug(f"User info fetched: {user_info}")  # 로그 추가
         return jsonify(user_info), 200
     except Exception as e:
-        print(f"Error: {str(e)}")
+        logger.debug(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
+
+
 
 @app.route('/api/get/event-list', methods=['GET'])
 def get_event_list():
