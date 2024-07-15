@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 
 #JWT 설정
@@ -685,13 +685,18 @@ def get_photo(photo_id):
     try:
         # First, try to get the photo from the admin collection
         try:
+            print(f"Trying to get photo {photo_id} from admin collection")
             file = fs_admin.get(ObjectId(photo_id))
+            print("Photo found in admin collection")
         except gridfs.errors.NoFile:
             # If not found in admin collection, try to get it from the user collection
+            print(f"Photo {photo_id} not found in admin collection, trying user collection")
             file = fs_user.get(ObjectId(photo_id))
+            print("Photo found in user collection")
 
         # Read the data from the file
         data = file.read()
+        print("Photo data read successfully")
 
         # Create a response with the image data
         response = make_response(data)
@@ -704,15 +709,19 @@ def get_photo(photo_id):
         print(f"Error: {str(e)}")
         return jsonify({"status": "Failed", "message": str(e)}), 500
 
+
 @app.route('/api/admin/get/photos', methods=['GET'])
 @jwt_required()  # Ensure only authorized users can access this endpoint
 def get_photos():
     try:
         token = request.headers.get('Authorization').split()[1]
+        print(f"Authorization token: {token}")
+
         # Fetch photos from admin collection
         admin_photos = fs_admin.find()
         admin_photo_list = []
         for photo in admin_photos:
+            print(f"Reading photo {photo._id} from admin collection")
             # Read image data and encode in base64
             image_data = fs_admin.get(photo._id).read()
             base64_img = base64.b64encode(image_data).decode('utf-8')
@@ -728,6 +737,7 @@ def get_photos():
         user_photos = fs_user.find()
         user_photo_list = []
         for photo in user_photos:
+            print(f"Reading photo {photo._id} from user collection")
             # Read image data and encode in base64
             image_data = fs_user.get(photo._id).read()
             base64_img = base64.b64encode(image_data).decode('utf-8')
@@ -744,6 +754,7 @@ def get_photos():
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"status": "Failed", "message": str(e)}), 500
+
 
 @app.route('/api/admin/deletephoto', methods=['DELETE'])
 @jwt_required()
