@@ -1,11 +1,12 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
 from database import admin_stats
+from .admin_routes import admin_required
 
-stats_bp = Blueprint('stats_bp', __name__)
+admin_stats_bp = Blueprint('admin_stats_bp', __name__)
 
-@stats_bp.route('/api/admin/create_update_stats', methods=['POST'])
-@jwt_required()
+@admin_stats_bp.route('/api/admin/create_update_stats', methods=['POST'])
+@admin_required
 def create_update_stats():
     try:
         data = request.json
@@ -49,7 +50,7 @@ def create_update_stats():
     except Exception as e:
         return jsonify({"status": "Failed to create or update stats", "error": str(e)}), 500
 
-@stats_bp.route('/api/admin/get/stats', methods=['GET'])
+@admin_stats_bp.route('/api/admin/get/stats', methods=['GET'])
 def get_stats():
     try:
         stats = list(admin_stats.find({}).sort([("season", -1)]))
