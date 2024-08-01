@@ -57,7 +57,7 @@ def crawl_data(query):
 
     return articles    
 
-@newsrookie_bp.route('/api/search/')
+@newsrookie_bp.route('/api/rookie/search/')
 def search_rookie():
     query = request.args.get('q')
     if not query:
