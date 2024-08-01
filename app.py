@@ -2,7 +2,7 @@ from flask import Flask
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from config import Config
-from routes import auth_bp, user_bp, guestbook_bp, event_bp, photo_bp, schedule_bp, stats_bp, newsrookie_bp
+from routes import auth_bp, user_bp, guestbook_bp, event_bp, photo_bp, schedule_bp, stats_bp, newsrookie_bp, newsjumpball_bp
 from routes.admin.admin_routes import admin_bp
 from routes.admin.profile_routes import profile_bp
 from routes.admin.schedule_routes import admin_schedule_bp
@@ -33,6 +33,7 @@ app.register_blueprint(profile_bp)
 app.register_blueprint(admin_stats_bp)
 app.register_blueprint(stats_bp)
 app.register_blueprint(newsrookie_bp)
+app.register_blueprint(newsjumpball_bp)
 
 if __name__ == '__main__':
     print(app.url_map)
