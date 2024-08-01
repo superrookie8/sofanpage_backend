@@ -8,3 +8,4 @@ from .schedule_routes import schedule_bp
 from .stats_routes import stats_bp
 from .newsrookie_routes import newsrookie_bp
 from .newsjump_routes import newsjumpball_bp
+from .news_routes import news_bp
