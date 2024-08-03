@@ -93,7 +93,7 @@ def search_jumpball():
     articles = news_jumpball.find({
         '$or': [
             {'title': {'$regex': query, '$options': 'i'}}, 
-            {'summary': {'$regex': query, '$options': 'i'}}
+            # {'summary': {'$regex': query, '$options': 'i'}}
         ]
     }).sort('created_at', -1)
     data = [{'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'),'created_at': article['created_at']} for article in articles]
