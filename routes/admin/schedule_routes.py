@@ -31,6 +31,10 @@ def create_or_update_schedule():
         if data.get("extraHome"):
             schedule_data["extraHome"] = data["extraHome"]
 
+        # spacialGame 필드 추가
+        if data.get("spacialGame"):
+            schedule_data["spacialGame"] = data["spacialGame"]
+
         if schedule_id:
             schedules.update_one({"_id": ObjectId(schedule_id)}, {"$set": schedule_data})
             message = "Schedule updated"
@@ -42,6 +46,7 @@ def create_or_update_schedule():
         return jsonify({"status": message}), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
+
 
 @admin_schedule_bp.route('/api/admin/get/schedule', methods=['GET'])
 def get_schedules():
