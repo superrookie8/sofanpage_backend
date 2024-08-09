@@ -103,3 +103,48 @@ def get_user_guestbook_entries():
         return jsonify({"entries": entry_list, "total_entries": total_entries}), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
+
+@guestbook_bp.route('/api/update_guestbook_entry', methods=['PUT'])
+def update_guestbook_entry():
+    try:
+        entry_id = request.form.get('id')
+        message = request.form.get('message')  # message는 필수
+
+        if not entry_id:
+            return jsonify({"message": "ID is required"}), 400
+        if not message:
+            return jsonify({"message": "Message is required"}), 400
+
+        # message 필드만 업데이트
+        updated_entry = {
+            "message": message,  # 필수 수정
+        }
+
+        # 사진 업데이트 처리
+        photo = request.files.get('photo')
+        if photo:
+            # 기존 엔트리 조회
+            old_entry = guestbooks.find_one({"_id": ObjectId(entry_id)})
+            if old_entry is None:
+                return jsonify({"message": "Entry not found"}), 404
+
+            # 기존 photo_id가 있으면 삭제 후 새로 업로드
+            if old_entry.get('photo_id'):
+                fs_guestbooks.delete(ObjectId(old_entry['photo_id']))
+            photo_id = fs_guestbooks.put(photo, filename=f"{old_entry['name']}_photo.jpg")
+            updated_entry['photo_id'] = str(photo_id)
+
+        result = guestbooks.update_one(
+            {"_id": ObjectId(entry_id)},
+            {"$set": updated_entry}
+        )
+
+        if result.matched_count == 0:
+            return jsonify({"message": "Entry not found"}), 404
+
+        return jsonify({"message": "Entry updated successfully"}), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+
+
