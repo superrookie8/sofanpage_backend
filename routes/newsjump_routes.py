@@ -27,6 +27,9 @@ def crawl_jumpball(query):
     total_pages = 11  # 크롤링할 총 페이지 수
     articles = []
 
+    db = current_app.config['db']
+    news_jumpball = db['news_jumpball']
+
     for page in range(total_pages + 1):  # 0부터 10까지 페이지네이션 처리
         params = {
             'q': query,
@@ -62,6 +65,11 @@ def crawl_jumpball(query):
                     image_tag = item.select_one('.img a')
                     image_url = image_tag['style'].split("url('")[1].split("')")[0] if image_tag else None
                     
+                    # 중복 확인: 이미 있는 링크인지 확인
+                    if news_jumpball.find_one({'link': link}):
+                        print(f"Duplicate article found, skipping: {link}")
+                        continue
+                    
                     article = {
                         'title': title, 
                         'link': link,
@@ -74,14 +82,14 @@ def crawl_jumpball(query):
                     page_articles += 1
         print(f"Articles found on page {page} from Jumpball: {page_articles}")
 
+    # 중복 제거 후 데이터베이스에 삽입
     if articles:
-        db = current_app.config['db']
-        news_jumpball = db['news_jumpball']
         news_jumpball.insert_many(articles)
     
     return articles  # 반드시 리스트를 반환
 
-@newsjumpball_bp.route('/api/jumpball/search/')
+
+@newsjumpball_bp.route('/api/jumpball/search/',strict_slashes=False)
 def search_jumpball():
     query = request.args.get('q')
     if not query:
@@ -90,17 +98,30 @@ def search_jumpball():
     db = current_app.config['db']
     news_jumpball = db['news_jumpball']
     two_months_ago = datetime.utcnow() - timedelta(days=60)
-    articles = news_jumpball.find({
+    articles = list(news_jumpball.find({
         '$or': [
             {'title': {'$regex': query, '$options': 'i'}}, 
             # {'summary': {'$regex': query, '$options': 'i'}}
         ]
-    }).sort('created_at', -1)
-    data = [{'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'),'created_at': article['created_at']} for article in articles]
+    }).sort('created_at', -1))
 
-    last_crawl = news_jumpball.find_one(sort=[("created_at", -1)])  # sort 인수 수정
+    # 중복 제거 로직 추가: link를 기준으로 중복 제거
+    seen_links = set()
+    unique_articles = []
+    for article in articles:
+        if article['link'] not in seen_links:
+            seen_links.add(article['link'])
+            unique_articles.append(article)
+    
+    data = [{'_id': str(article['_id']),'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'),'created_at': article['created_at']} for article in unique_articles]
+
+    last_crawl = news_jumpball.find_one(sort=[("created_at", -1)])
     if not last_crawl or last_crawl['created_at'] < two_months_ago:
-        new_data = crawl_jumpball(query)  # 함수 이름 수정
+        # 기존 데이터 삭제
+        news_jumpball.delete_many({})
+        
+        # 새롭게 데이터 크롤링
+        new_data = crawl_jumpball(query)
         if new_data:  # new_data가 None이 아닌지 및 비어있지 않은지 확인
             new_data = [{'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'),'created_at': article['created_at']} for article in new_data]
             data = new_data + data

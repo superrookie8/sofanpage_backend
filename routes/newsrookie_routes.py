@@ -17,6 +17,10 @@ def crawl_data(query):
     total_pages = 47  # 크롤링할 총 페이지 수
     articles = []
 
+    db = current_app.config['db']
+    news_rookie = db['news_rookie']
+    existing_links = set(article['link'] for article in news_rookie.find({}, {'link': 1}))
+
     for page in range(1, total_pages + 1):
         params = {
             'sc_word': query,
@@ -38,8 +42,14 @@ def crawl_data(query):
                 title = title_tag.text.strip()
                 summary = summary_tag.text.strip() if summary_tag else ""
                 if query in title or query in summary:
-                    print(f"Found title: {title}")
                     link = 'https://www.rookie.co.kr' + title_tag['href']
+                    
+                    # 중복 확인: 이미 있는 링크인지 확인
+                    if link in existing_links:
+                        print(f"Duplicate article found, skipping: {link}")
+                        continue
+                    
+                    print(f"Found title: {title}")
 
                     # 기사 페이지에서 작성 시간 파싱
                     article_response = requests.get(link, headers=headers)
@@ -60,17 +70,16 @@ def crawl_data(query):
                     }
                     
                     articles.append(article)
+                    existing_links.add(link)  # Set에 새로운 링크 추가
                     page_articles += 1
         print(f"Articles found on page {page} from Rookie: {page_articles}")
 
     if articles:
-        db = current_app.config['db']
-        news_rookie = db['news_rookie']
         news_rookie.insert_many(articles)
     
     return articles  # 반드시 리스트를 반환
 
-@newsrookie_bp.route('/api/rookie/search/')
+@newsrookie_bp.route('/api/rookie/search/' , strict_slashes=False)
 def search_rookie():
     query = request.args.get('q')
     if not query:
@@ -79,19 +88,36 @@ def search_rookie():
     db = current_app.config['db']
     news_rookie = db['news_rookie']
     two_months_ago = datetime.utcnow() - timedelta(days=60)
-    articles = news_rookie.find({
+    articles = list(news_rookie.find({
         '$or': [
             {'title': {'$regex': query, '$options': 'i'}}, 
             # {'summary': {'$regex': query, '$options': 'i'}}
         ]
-    }).sort('created_at', -1)
-    data = [{'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'), 'created_at': article['created_at']} for article in articles]
+    }).sort('created_at', -1))
+
+    # 중복 제거 로직 추가: link를 기준으로 중복 제거
+    seen_links = set()
+    unique_articles = []
+    for article in articles:
+        if article['link'] not in seen_links:
+            seen_links.add(article['link'])
+            unique_articles.append(article)
+    
+    data = [{'_id': str(article['_id']), 'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'), 'created_at': article['created_at']} for article in unique_articles]
 
     last_crawl = news_rookie.find_one(sort=[("created_at", -1)])
     if not last_crawl or last_crawl['created_at'] < two_months_ago:
+        # 기존 데이터 삭제
+        news_rookie.delete_many({})
+        
+        # 새로운 데이터 크롤링 및 삽입
         new_data = crawl_data(query)
         if new_data:
-            new_data = [{'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'), 'created_at': article['created_at']} for article in new_data]
+            # 새로운 데이터 리스트 작성
+            new_data = [{'_id': str(article['_id']), 'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'), 'created_at': article['created_at']} for article in new_data]
+            # 기존 데이터 위에 새로운 데이터를 추가
             data = new_data + data
 
     return jsonify(data)
+
+
