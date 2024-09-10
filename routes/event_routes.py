@@ -9,12 +9,17 @@ event_bp = Blueprint('event', __name__)
 @event_bp.route('/api/get/event-list', methods=['GET'])
 def get_event_list():
     try:
-        events_list = list(events.find({}, {"_id": 1, "title": 1}))
+        # date 필드를 기준으로 최신순으로 정렬 (-1)
+        events_list = list(events.find({}, {"_id": 1, "title": 1, "url": 1, "description": 1, "date": 1, "check_1": 1, "check_2": 1, "check_3": 1, "photos": 1}).sort("date", -1))
+        
+        # _id를 문자열로 변환
         for event in events_list:
             event["_id"] = str(event["_id"])
+
         return jsonify({"events": events_list}), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
+
 
 @event_bp.route('/api/get/event-detail/<event_id>', methods=['GET'])
 def get_event_detail(event_id):
