@@ -6,37 +6,58 @@ from datetime import datetime, timedelta
 
 newsjumpball_bp = Blueprint('newsjumpball_bp', __name__)
 
+# 날짜 파싱 함수 개선
 def parse_date(date_string):
     try:
-        # 정규 표현식을 이용하여 "기사승인 : YYYY-MM-DD HH:MM:SS" 부분을 추출
-        pattern = r"기사승인\s*:\s*(\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}:\d{2})"
+        # 날짜와 시간을 모두 추출하는 패턴 (예: "2024-09-10 15:30:00")
+        pattern = r"(\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}:\d{2})"
         match = re.search(pattern, date_string)
         
         if match:
             # 추출된 문자열을 datetime 객체로 변환
-            date_substr = match.group(1)
-            return datetime.strptime(date_substr, "%Y-%m-%d %H:%M:%S")
+            return datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
         else:
             return None
     except ValueError:
         return None
 
+# 페이지 수를 동적으로 추출하는 함수
+def get_total_pages(soup):
+    # 페이지 네이션 숫자 중 가장 큰 값 찾기
+    pagination = soup.select('.pagination a')
+    if pagination:
+        last_page = pagination[-1].get('href')
+        total_pages = re.search(r'pagenum=(\d+)', last_page).group(1)
+        return int(total_pages)
+    return 1
+
+# 크롤링 함수 수정
 def crawl_jumpball(query):
     base_url = 'https://jumpball.co.kr/news/search.php'
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-    total_pages = 11  # 크롤링할 총 페이지 수
     articles = []
 
     db = current_app.config['db']
     news_jumpball = db['news_jumpball']
 
-    for page in range(total_pages + 1):  # 0부터 10까지 페이지네이션 처리
-        params = {
-            'q': query,
-            'sfld': 'subj',
-            'period': 'ALL',
-            'pagenum': page
-        }
+    # 첫 페이지 가져와서 페이지 수 동적으로 계산
+    params = {
+        'q': query,
+        'sfld': 'subj',
+        'period': 'ALL',
+        'pagenum': 0
+    }
+    
+    response = requests.get(base_url, headers=headers, params=params)
+    if response.status_code != 200:
+        print(f"Failed to retrieve data for the first page: {response.status_code}")
+        return []
+    
+    soup = BeautifulSoup(response.content, 'html.parser')
+    total_pages = get_total_pages(soup)
+
+    for page in range(total_pages + 1):  # 0부터 마지막 페이지까지 크롤링
+        params['pagenum'] = page
         print(f"Crawling page {page} from Jumpball")
         response = requests.get(base_url, headers=headers, params=params)
         if response.status_code != 200:
@@ -61,7 +82,7 @@ def crawl_jumpball(query):
                     date_tag = article_soup.select_one('.viewTitle > dl > dd')
                     date_text = date_tag.text.strip() if date_tag else ""
                     created_at = parse_date(date_text)
-                  
+
                     image_tag = item.select_one('.img a')
                     image_url = image_tag['style'].split("url('")[1].split("')")[0] if image_tag else None
                     
@@ -87,7 +108,6 @@ def crawl_jumpball(query):
         news_jumpball.insert_many(articles)
     
     return articles  # 반드시 리스트를 반환
-
 
 @newsjumpball_bp.route('/api/jumpball/search/',strict_slashes=False)
 def search_jumpball():
@@ -115,19 +135,14 @@ def search_jumpball():
     
     data = [{'_id': str(article['_id']),'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'),'created_at': article['created_at']} for article in unique_articles]
 
+    # 마지막 크롤링된 기사 확인
     last_crawl = news_jumpball.find_one(sort=[("created_at", -1)])
-    if not last_crawl or last_crawl['created_at'] < two_months_ago:
-        # 기존 데이터 삭제
-        news_jumpball.delete_many({})
-        
-        # 새롭게 데이터 크롤링
+    if not last_crawl or last_crawl['created_at'] < datetime.utcnow() - timedelta(days=1):
+        # 하루 이상 차이가 있을 경우에만 새롭게 크롤링
+        news_jumpball.delete_many({})  # 기존 데이터 삭제
         new_data = crawl_jumpball(query)
         if new_data:  # new_data가 None이 아닌지 및 비어있지 않은지 확인
             new_data = [{'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'),'created_at': article['created_at']} for article in new_data]
             data = new_data + data
 
     return jsonify(data)
-
-
-
-
