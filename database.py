@@ -11,6 +11,7 @@ fs_admin = gridfs.GridFS(db, collection='admin_photo')
 fs_user = gridfs.GridFS(db, collection='user_photo')
 fs_event = gridfs.GridFS(db, collection="event_photo")
 fs_guestbooks = gridfs.GridFS(db, collection="guestbooks_photo")
+fs_diary = gridfs.GridFS(db, collection='diary_photo')
 
 users = db['users']
 guestbooks = db['guestbooks']
@@ -22,3 +23,4 @@ schedules = db['admin_schedules']
 events = db['admin_events']
 news_rookie = db['news_rookie']
 news_jumpball = db['news_jumpball']
+diaries = db['diaries']
