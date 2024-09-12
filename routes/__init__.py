@@ -10,3 +10,4 @@ from .newsrookie_routes import newsrookie_bp
 from .newsjump_routes import newsjumpball_bp
 from .news_routes import news_bp
 from .diary_routes import diary_bp
+

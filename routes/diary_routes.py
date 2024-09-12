@@ -154,3 +154,98 @@ def get_diary_entries():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@diary_bp.route('/api/user_stats', methods=['GET'])
+def get_user_stats():
+    try:
+        # 사용자 닉네임을 파라미터로 받아옴
+        nickname = request.args.get('nickname')
+
+        # 현재 날짜
+        today = datetime.now()
+
+        # 현재 시즌의 시작일과 끝일 계산 (5월 1일 ~ 다음 해 4월 30일)
+        if today.month >= 5:
+            season_start = datetime(today.year, 5, 1)
+            season_end = datetime(today.year + 1, 4, 30)
+        else:
+            season_start = datetime(today.year - 1, 5, 1)
+            season_end = datetime(today.year, 4, 30)
+
+        # 해당 시즌의 다이어리 항목들 가져오기 (5월 1일부터 다음 해 4월 30일까지)
+        user_diaries = list(diaries.find({
+            "name": nickname,
+            "date": {"$gte": season_start, "$lte": season_end}
+        }))
+
+        total_games_watched = len(user_diaries)  # 사용자가 직관한 총 경기 수
+        if total_games_watched == 0:
+            return jsonify({"message": "No games found for the user."}), 404
+
+        # 총 경기 수 (1년 160경기 기준)
+        total_season_games = 160
+
+        # 홈 경기 장소 목록
+        HOME_LOCATIONS = ["busan", "second", "third"]
+
+        # 승리한 경기 수, 홈 경기 수, 홈 승리 수 등 계산
+        win_count = 0
+        home_games = 0
+        home_wins = 0
+
+        # 맑은 날씨 경기에 대한 카운트
+        sunny_count = 0
+
+        for diary in user_diaries:
+            location = diary['location']
+            win_status = diary['win_status']
+            weather = diary['weather']
+
+            # 홈 경기 여부 판단
+            is_home_game = location in HOME_LOCATIONS
+
+            if win_status == "win":  # 승리한 경기
+                win_count += 1
+                if is_home_game:
+                    home_wins += 1
+
+            if is_home_game:
+                home_games += 1
+
+            # 맑은 날씨 경기를 카운트
+            if weather == 'sunny':
+                sunny_count += 1
+
+        # 원정 경기 관련 데이터
+        away_games = total_games_watched - home_games
+        away_wins = win_count - home_wins
+
+        # 맑은 날씨 퍼센트 계산
+        sunny_percentage = round((sunny_count / total_games_watched) * 100, 1) if total_games_watched > 0 else 0
+
+        # 승률, 홈 경기 승률, 원정 경기 승률 계산 (직관한 경기만 기준으로 계산)
+        win_percentage = round((win_count / total_games_watched) * 100, 1) if total_games_watched > 0 else 0
+        home_win_percentage = round((home_wins / home_games) * 100, 1) if home_games > 0 else 0
+        away_win_percentage = round((away_wins / away_games) * 100, 1) if away_games > 0 else 0
+
+        # 총경기수 대비 직관 경기 비율 계산
+        attendance_percentage = round((total_games_watched / total_season_games) * 100, 1)
+
+        # 결과 데이터 반환
+        data = {
+            "nickname": nickname,
+            "total_games_watched": total_games_watched,
+            "win_percentage": win_percentage,
+            "home_win_percentage": home_win_percentage,
+            "away_win_percentage": away_win_percentage,
+            "sunny_percentage": sunny_percentage,  # 맑은 날씨 비율
+            "attendance_percentage": attendance_percentage,  # 총경기 대비 직관 횟수 비율
+            "season": f"{season_start.year}-{season_end.year}"  # 시즌 정보 추가
+        }
+
+        return jsonify(data)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
