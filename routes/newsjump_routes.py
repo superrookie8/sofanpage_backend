@@ -109,7 +109,7 @@ def crawl_jumpball(query):
     
     return articles  # 반드시 리스트를 반환
 
-@newsjumpball_bp.route('/api/jumpball/search/',strict_slashes=False)
+@newsjumpball_bp.route('/api/jumpball/search/', strict_slashes=False)
 def search_jumpball():
     query = request.args.get('q')
     if not query:
@@ -117,32 +117,42 @@ def search_jumpball():
 
     db = current_app.config['db']
     news_jumpball = db['news_jumpball']
-    two_months_ago = datetime.utcnow() - timedelta(days=60)
+
+    # 최신 기사의 작성일 확인
+    last_article = news_jumpball.find_one(sort=[("created_at", -1)])
+
+    # 크롤링이 필요할 때만 수행 (마지막 기사의 작성일이 한 달 이상 지났을 경우)
+    if not last_article or last_article['created_at'] < datetime.utcnow() - timedelta(days=30):
+        print("Crawling new articles...")
+        new_articles = crawl_jumpball(query)
+
+        if new_articles:  # 새로운 기사가 있는 경우에만 삽입
+            news_jumpball.insert_many(new_articles)
+
+    # 데이터베이스에서 검색 결과 반환
     articles = list(news_jumpball.find({
         '$or': [
-            {'title': {'$regex': query, '$options': 'i'}}, 
-            # {'summary': {'$regex': query, '$options': 'i'}}
+            {'title': {'$regex': query, '$options': 'i'}},
         ]
     }).sort('created_at', -1))
 
-    # 중복 제거 로직 추가: link를 기준으로 중복 제거
+    # 중복 제거 및 결과 처리
     seen_links = set()
     unique_articles = []
     for article in articles:
         if article['link'] not in seen_links:
             seen_links.add(article['link'])
             unique_articles.append(article)
-    
-    data = [{'_id': str(article['_id']),'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'),'created_at': article['created_at']} for article in unique_articles]
 
-    # 마지막 크롤링된 기사 확인
-    last_crawl = news_jumpball.find_one(sort=[("created_at", -1)])
-    if not last_crawl or last_crawl['created_at'] < datetime.utcnow() - timedelta(days=1):
-        # 하루 이상 차이가 있을 경우에만 새롭게 크롤링
-        news_jumpball.delete_many({})  # 기존 데이터 삭제
-        new_data = crawl_jumpball(query)
-        if new_data:  # new_data가 None이 아닌지 및 비어있지 않은지 확인
-            new_data = [{'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'),'created_at': article['created_at']} for article in new_data]
-            data = new_data + data
+    data = [
+        {
+            '_id': str(article['_id']),
+            'title': article['title'],
+            'link': article['link'],
+            'summary': article['summary'],
+            'image_url': article.get('image_url'),
+            'created_at': article['created_at']
+        } for article in unique_articles
+    ]
 
     return jsonify(data)

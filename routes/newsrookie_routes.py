@@ -127,37 +127,42 @@ def search_rookie():
 
     db = current_app.config['db']
     news_rookie = db['news_rookie']
-    two_months_ago = datetime.utcnow() - timedelta(days=60)
+
+    # 최신 기사의 작성일 확인
+    last_article = news_rookie.find_one(sort=[("created_at", -1)])
+
+    # 크롤링이 필요할 때만 수행 (마지막 기사의 작성일이 한 달 이상 지났을 경우)
+    if not last_article or last_article['created_at'] < datetime.utcnow() - timedelta(days=30):
+        print("Crawling new articles...")
+        new_articles = crawl_data(query)
+
+        if new_articles:  # 새로운 기사가 있는 경우에만 삽입
+            news_rookie.insert_many(new_articles)
+
+    # 데이터베이스에서 검색 결과 반환
     articles = list(news_rookie.find({
         '$or': [
             {'title': {'$regex': query, '$options': 'i'}}
         ]
     }).sort('created_at', -1))
 
-    # 중복 제거 로직 추가: link를 기준으로 중복 제거
+    # 중복 제거 로직 추가
     seen_links = set()
     unique_articles = []
     for article in articles:
         if article['link'] not in seen_links:
             seen_links.add(article['link'])
             unique_articles.append(article)
-    
-    data = [{'_id': str(article['_id']), 'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'), 'created_at': article['created_at']} for article in unique_articles]
 
-    last_crawl = news_rookie.find_one(sort=[("created_at", -1)])
-    if not last_crawl or last_crawl['created_at'] <  datetime.utcnow() - timedelta(days=1):
-        # 기존 데이터 삭제 후 새로 크롤링
-        news_rookie.delete_many({})
-         
-        # 새로운 데이터 크롤링 및 삽입
-        new_data = crawl_data(query)
-        if new_data:
-            # 새로운 데이터 리스트 작성
-            new_data = [{'_id': str(article['_id']), 'title': article['title'], 'link': article['link'], 'summary': article['summary'], 'image_url': article.get('image_url'), 'created_at': article['created_at']} for article in new_data]
-            # 기존 데이터 위에 새로운 데이터를 추가
-            data = new_data + data
+    data = [
+        {
+            '_id': str(article['_id']),
+            'title': article['title'],
+            'link': article['link'],
+            'summary': article['summary'],
+            'image_url': article.get('image_url'),
+            'created_at': article['created_at']
+        } for article in unique_articles
+    ]
 
     return jsonify(data)
-
-
-
