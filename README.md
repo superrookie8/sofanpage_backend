@@ -52,6 +52,10 @@ Flask의 Blueprint를 사용하여 애플리케이션의 각 기능을 모듈화
 - **app.py**: Flask 애플리케이션의 엔트리포인트로, 위의 Blueprint들을 모두 등록하여 API 라우트를 설정합니다.
 
 
+### 참고사항
+
+프론트엔드 깃허브
+[:link:](https://github.com/superrookie8/sofanpage)
 
 ## 배포된 사이트
 [supersohee.com](https://www.supersohee.com)
