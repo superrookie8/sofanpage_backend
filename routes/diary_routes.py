@@ -1,10 +1,12 @@
 from flask import Blueprint, request, jsonify, session, Flask
 from database import fs_diary, diaries
 from bson import ObjectId
-from gridfs.errors import NoFile, GridFSError  # 중복 제거
+from gridfs import GridFS, errors as gridfs_errors
 from datetime import datetime
 from flask_cors import CORS
 import base64
+from gridfs.errors import NoFile, GridFSError  # Add GridFSError import
+from flask_jwt_extended import jwt_required, get_jwt_identity  # Add this import
 
 # Blueprint 설정
 diary_bp = Blueprint('diary_bp', __name__)
@@ -37,7 +39,7 @@ def post_diary():
             try:
                 # 파일을 GridFS에 저장하고 ID를 photo_id로 저장
                 photo_id = fs_diary.put(diary_photo, filename=diary_photo.filename)
-            except gridfs.errors.GridFSError as e:
+            except gridfs_errors.GridFSError as e:
                 return jsonify({"error": "Failed to save photo"}), 500
 
         # location에 따른 홈경기 여부 자동 설정
@@ -100,7 +102,7 @@ def get_diary_personal():
                     if ObjectId.is_valid(photo_id):
                         print(f"Trying to fetch photo with id: {photo_id}")
                         # GridFS에서 파일을 찾기
-                        file = fs_diary.get(ObjectId(photo_id))  # fs_diary를 사용
+                        file = fs_diary.get(ObjectId(photo_id))  # fs_diary를 사
                         print(f"Photo {photo_id} found in GridFS.")
                         # 파일 데이터를 Base64로 인코딩
                         base64_data = base64.b64encode(file.read()).decode('utf-8')
@@ -146,7 +148,7 @@ def get_diary_entries():
                 try:
                     photo_file = fs_diary.get(ObjectId(diary['diary_photo']))
                     diary['diary_photo'] = base64.b64encode(photo_file.read()).decode('utf-8')
-                except gridfs.errors.NoFile:
+                except NoFile:
                     diary['diary_photo'] = None  # 파일이 없는 경우
 
         return jsonify(all_diaries), 200
@@ -249,3 +251,31 @@ def get_user_stats():
         return jsonify({"error": str(e)}), 500
 
 
+@diary_bp.route('/api/delete_diary', methods=['DELETE'])
+@jwt_required()
+def delete_diary():
+    try:
+        nickname = get_jwt_identity()
+        entry_id = request.args.get('entry_id')
+
+        if not entry_id:
+            return jsonify({"error": "Entry ID is required"}), 400
+
+        # Check if the diary entry exists and belongs to the user
+        diary_entry = diaries.find_one({"_id": ObjectId(entry_id), "name": nickname})
+        if not diary_entry:
+            return jsonify({"error": "Diary entry not found or you do not have permission to delete it"}), 404
+
+        # Delete the diary entry
+        diaries.delete_one({"_id": ObjectId(entry_id)})
+
+        # If the diary entry has a photo, delete it from GridFS
+        if diary_entry.get('diary_photo'):
+            try:
+                fs_diary.delete(ObjectId(diary_entry['diary_photo']))
+            except gridfs_errors.NoFile:
+                pass  # If the file is not found, ignore the error
+
+        return jsonify({"message": "Diary entry deleted successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
