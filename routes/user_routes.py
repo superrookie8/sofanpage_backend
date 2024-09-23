@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 @jwt_required()
 def update_profile():
     try:
+        # JWT 토큰 확인 로그 추가
+        logger.debug(f"JWT Identity: {get_jwt_identity()}")
+
         nickname = get_jwt_identity()
         user = users.find_one({"nickname": nickname})
         if not user:
@@ -23,18 +26,47 @@ def update_profile():
         description = request.form.get("description")
         photo = request.files.get("photo")
 
+        logger.debug(f"Received description: {description}")
+        logger.debug(f"Received photo: {photo}")
+
+        if not description and not photo:
+            return jsonify({"message": "No data to update"}), 400
+
         update_data = {}
 
         if description:
             update_data["description"] = description
         if photo:
+            # 기존 사진 ID 가져오기
+            existing_photo_id = user.get("photo")
+            if existing_photo_id:
+                try:
+                    # 기존 사진 삭제
+                    photo_id_str = existing_photo_id.split('/')[-1]
+                    photo_id = ObjectId(photo_id_str)
+                    fs_user.delete(photo_id)
+                    logger.debug(f"Deleted existing photo with ID: {photo_id}")
+                except Exception as e:
+                    logger.error(f"Error deleting existing photo: {str(e)}")
+
+            # 새로운 사진 저장
             photo_id = fs_user.put(photo, filename=f"{nickname}_profile_photo.jpg")
             update_data["photo"] = f"/api/photo/{photo_id}"
 
-        if not update_data:
-            return jsonify({"message": "No data to update"}), 400
+        logger.debug(f"Update query: {{'_id': user['_id']}}")
+        logger.debug(f"Update data: {update_data}")
 
-        users.update_one({"_id": user['_id']}, {"$set": update_data})
+        result = users.update_one({"_id": user['_id']}, {"$set": update_data})
+        logger.debug(f"Update result: {result.raw_result}")
+
+        # Check if the update was acknowledged and matched a document
+        if result.matched_count == 0:
+            logger.error("No document matched the query. Update failed.")
+            return jsonify({"message": "Update failed"}), 500
+
+        if result.modified_count == 0:
+            logger.error("Document was not modified. Update might have failed.")
+            return jsonify({"message": "Update might have failed"}), 500
 
         return jsonify(update_data), 200
     except Exception as e:
