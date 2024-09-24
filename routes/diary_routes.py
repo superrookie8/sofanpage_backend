@@ -27,20 +27,29 @@ def post_diary():
         location = request.form.get("location", "")
         together = request.form.get("together", "")
         win_status = request.form.get("win_status", "")
-        section = request.form.get("section", "")  # 좌석 구역
-        row = request.form.get("row", "")  # 좌석 열
-        number = request.form.get("number", "")  # 좌석 번호
-        diary_photo = request.files.get('diary_photo')  # 이미지 파일
+        section = request.form.get("section", "")
+        row = request.form.get("row", "")
+        number = request.form.get("number", "")
         message = request.form.get("message", "")
 
+        # 사진 파일 받아오기
+        ticket_photo = request.files.get('ticket_photo')
+        view_photo = request.files.get('view_photo')
+        additional_photo = request.files.get('additional_photo')
+
+        # 필수 사진 확인
+        if not ticket_photo or not view_photo:
+            return jsonify({"error": "Ticket photo and view photo are required"}), 400
+
         # GridFS에 이미지 저장
-        photo_id = None
-        if diary_photo:
-            try:
-                # 파일을 GridFS에 저장하고 ID를 photo_id로 저장
-                photo_id = fs_diary.put(diary_photo, filename=diary_photo.filename)
-            except gridfs_errors.GridFSError as e:
-                return jsonify({"error": "Failed to save photo"}), 500
+        photo_ids = {}
+        try:
+            photo_ids['ticket_photo'] = fs_diary.put(ticket_photo, filename=f"{name}_ticket_{date}.jpg")
+            photo_ids['view_photo'] = fs_diary.put(view_photo, filename=f"{name}_view_{date}.jpg")
+            if additional_photo:
+                photo_ids['additional_photo'] = fs_diary.put(additional_photo, filename=f"{name}_additional_{date}.jpg")
+        except gridfs_errors.GridFSError as e:
+            return jsonify({"error": "Failed to save photos"}), 500
 
         # location에 따른 홈경기 여부 자동 설정
         is_home_game = location in HOME_LOCATIONS
@@ -51,20 +60,20 @@ def post_diary():
         # diaries 컬렉션에 저장할 데이터
         diary_entry = {
             "name": name,
-            "date": datetime.strptime(date, '%Y-%m-%d'),  # 날짜 파싱
+            "date": datetime.strptime(date, '%Y-%m-%d'),
             "weather": weather,
             "location": location,
             "together": together,
             "win_status": win_status,
             "is_home_game": is_home_game,
-            "diary_photo": photo_id,  # 이미지 ID
-            "diary_message": message,  # 메시지 필드
-            "saved_at": saved_at,  # 데이터 저장 시간 추가
+            "diary_photos": photo_ids,
+            "diary_message": message,
+            "saved_at": saved_at,
             "seat_info": {
                 "section": section,
                 "row": row,
                 "number": number
-            }  # 좌석 정보 추가
+            }
         }
 
         # MongoDB에 다이어리 데이터 저장
@@ -96,30 +105,14 @@ def get_diary_personal():
             diary['_id'] = str(diary['_id'])
 
             # GridFS에서 이미지를 가져와서 Base64로 변환
-            if diary.get('diary_photo'):
-                try:
-                    photo_id = diary['diary_photo']
-                    if ObjectId.is_valid(photo_id):
-                        print(f"Trying to fetch photo with id: {photo_id}")
-                        # GridFS에서 파일을 찾기
-                        file = fs_diary.get(ObjectId(photo_id))  # fs_diary를 사
-                        print(f"Photo {photo_id} found in GridFS.")
-                        # 파일 데이터를 Base64로 인코딩
-                        base64_data = base64.b64encode(file.read()).decode('utf-8')
-                        # Base64 데이터를 diary_photo 필드에 저장
-                        diary['diary_photo'] = base64_data
-                    else:
-                        print(f"Invalid ObjectId for photo: {photo_id}")
-                        diary['diary_photo'] = None  # 잘못된 ObjectId 처리
-                except NoFile:
-                    print(f"Error retrieving photo {photo_id}: File not found")
-                    diary['diary_photo'] = None  # 이미지가 없는 경우 처리
-                except GridFSError as e:
-                    print(f"GridFS Error retrieving photo {photo_id}: {str(e)}")
-                    diary['diary_photo'] = None  # GridFS 관련 에러 처리
-                except Exception as e:
-                    print(f"Error retrieving photo {photo_id}: {str(e)}")
-                    diary['diary_photo'] = None  # 기타 에러 발생 시 None으로 설정
+            if diary.get('diary_photos'):
+                for photo_type, photo_id in diary['diary_photos'].items():
+                    try:
+                        photo_file = fs_diary.get(ObjectId(photo_id))
+                        diary['diary_photos'][photo_type] = base64.b64encode(photo_file.read()).decode('utf-8')
+                    except (NoFile, GridFSError) as e:
+                        print(f"Error retrieving {photo_type} {photo_id}: {str(e)}")
+                        diary['diary_photos'][photo_type] = None
 
         return jsonify(user_diaries), 200
 
@@ -139,22 +132,35 @@ def get_diary_entries():
         # MongoDB에서 모든 일지 가져오기 (페이지네이션)
         all_diaries = list(diaries.find().skip(skip).sort('date', -1).limit(page_size))
 
-        # ObjectId를 문자열로 변환하고, 사진 처리
         for diary in all_diaries:
             diary['_id'] = str(diary['_id'])
-            
-            # diary_photo가 존재할 때만 GridFS에서 이미지 가져오기
-            if diary.get('diary_photo'):
-                try:
-                    photo_file = fs_diary.get(ObjectId(diary['diary_photo']))
-                    diary['diary_photo'] = base64.b64encode(photo_file.read()).decode('utf-8')
-                except NoFile:
-                    diary['diary_photo'] = None  # 파일이 없는 경우
+
+            # diary_photos가 존재할 때만 GridFS에서 이미지 가져오기
+            if 'diary_photos' in diary:
+                for photo_type, photo_id in diary['diary_photos'].items():
+                    try:
+                        file = fs_diary.get(ObjectId(photo_id))
+                        base64_data = base64.b64encode(file.read()).decode('utf-8')
+                        diary['diary_photos'][photo_type] = base64_data
+                    except (NoFile, GridFSError) as e:
+                        print(f"Error retrieving {photo_type} {photo_id}: {str(e)}")
+                        diary['diary_photos'][photo_type] = None
+
+            # datetime 객체를 문자열로 변환
+            if 'date' in diary:
+                diary['date'] = diary['date'].strftime('%Y-%m-%d')
+            if 'saved_at' in diary:
+                diary['saved_at'] = diary['saved_at'].isoformat()
 
         return jsonify(all_diaries), 200
 
     except Exception as e:
+        print(f"Server Error: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+
+
+
 
 
 @diary_bp.route('/api/user_stats', methods=['GET'])
@@ -270,11 +276,12 @@ def delete_diary():
         diaries.delete_one({"_id": ObjectId(entry_id)})
 
         # If the diary entry has a photo, delete it from GridFS
-        if diary_entry.get('diary_photo'):
-            try:
-                fs_diary.delete(ObjectId(diary_entry['diary_photo']))
-            except gridfs_errors.NoFile:
-                pass  # If the file is not found, ignore the error
+        if diary_entry.get('diary_photos'):
+            for photo_type, photo_id in diary_entry['diary_photos'].items():
+                try:
+                    fs_diary.delete(ObjectId(photo_id))
+                except gridfs_errors.NoFile:
+                    pass  # If the file is not found, ignore the error
 
         return jsonify({"message": "Diary entry deleted successfully"}), 200
     except Exception as e:
