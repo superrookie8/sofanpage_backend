@@ -5,9 +5,9 @@ from bson import ObjectId
 import base64
 import gridfs.errors
 
-photo_bp = Blueprint('photo_bp', __name__)
+admin_photo_bp = Blueprint('admin_photo_bp', __name__)
 
-@photo_bp.route('/api/admin/postphoto', methods=['POST'])
+@admin_photo_bp.route('/api/admin/postphoto', methods=['POST'])
 @jwt_required()
 def post_photo():
     try:
@@ -18,7 +18,7 @@ def post_photo():
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
-@photo_bp.route('/api/admin/get/photo/<photo_id>', methods=['GET'])
+@admin_photo_bp.route('/api/admin/get/photo/<photo_id>', methods=['GET'])
 @jwt_required()
 def get_photo(photo_id):
     try:
@@ -38,7 +38,7 @@ def get_photo(photo_id):
     except Exception as e:
         return jsonify({"status": "Failed", "message": str(e)}), 500
 
-@photo_bp.route('/api/admin/get/photos', methods=['GET'])
+@admin_photo_bp.route('/api/admin/get/photos', methods=['GET'])
 @jwt_required()
 def get_photos():
     try:
@@ -75,7 +75,7 @@ def get_photos():
     except Exception as e:
         return jsonify({"status": "Failed", "message": str(e)}), 500
 
-@photo_bp.route('/api/admin/deletephoto', methods=['DELETE'])
+@admin_photo_bp.route('/api/admin/deletephoto', methods=['DELETE'])
 @jwt_required()
 def delete_photos():
     try:

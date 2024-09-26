@@ -4,6 +4,7 @@ from flask_jwt_extended import JWTManager
 from config import Config
 from routes import auth_bp, user_bp, guestbook_bp, event_bp, photo_bp, schedule_bp, stats_bp, newsrookie_bp, newsjumpball_bp, news_bp, diary_bp
 from routes.admin.admin_routes import admin_bp
+from routes.admin.photo_routes import admin_photo_bp
 from routes.admin.profile_routes import profile_bp
 from routes.admin.schedule_routes import admin_schedule_bp
 from routes.admin.event_routes import admin_event_bp
@@ -24,6 +25,7 @@ app.register_blueprint(user_bp)
 app.register_blueprint(guestbook_bp)
 app.register_blueprint(event_bp)
 app.register_blueprint(photo_bp)
+app.register_blueprint(admin_photo_bp)
 app.register_blueprint(admin_schedule_bp)
 app.register_blueprint(schedule_bp)
 app.register_blueprint(admin_event_bp)
