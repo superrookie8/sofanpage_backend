@@ -7,17 +7,9 @@ photo_bp = Blueprint('photo', __name__)
 @photo_bp.route('/api/get/photos', methods=['GET'])
 def get_photos_public():
     try:
-        # Get pagination parameters
-        page = int(request.args.get('page', 1))
-        page_size = int(request.args.get('page_size', 10))
-        skip = (page - 1) * page_size
+        # token = request.headers.get('Authorization').split()[1]
 
-        # Fetch total count of photos
-        total_admin_photos = fs_admin._GridFS__files.count_documents({})
-        total_photos = total_admin_photos
-
-        # Fetch photos from admin collection
-        admin_photos = fs_admin.find().skip(skip).limit(page_size)
+        admin_photos = fs_admin.find()
         admin_photo_list = []
         for photo in admin_photos:
             image_data = fs_admin.get(photo._id).read()
@@ -27,11 +19,11 @@ def get_photos_public():
                 "_id": str(photo._id),
                 "filename": photo.filename,
                 "base64": data_url,
-                "url": f"/api/photos/{photo._id}"
+                # "url": f"/api/admin/get/photo/{photo._id}?token={token}"
+                "url": f"/api/admin/get/photo/{photo._id}"
             })
 
-        # Fetch photos from user collection
-        user_photos = fs_user.find().skip(skip).limit(page_size)
+        user_photos = fs_user.find()
         user_photo_list = []
         for photo in user_photos:
             image_data = fs_user.get(photo._id).read()
@@ -41,15 +33,11 @@ def get_photos_public():
                 "_id": str(photo._id),
                 "filename": photo.filename,
                 "base64": data_url,
-                "url": f"/api/photos/{photo._id}"
+                # "url": f"/api/admin/get/photo/{photo._id}?token={token}"
+                "url": f"/api/admin/get/photo/{photo._id}"
             })
 
-        return jsonify({
-            "admin_photos": admin_photo_list,
-            "user_photos": user_photo_list,
-            "total_photos": total_photos
-        }), 200
+        return jsonify({"admin_photos": admin_photo_list, "user_photos": user_photo_list}), 200
 
     except Exception as e:
-        print(f"Error: {str(e)}")
         return jsonify({"status": "Failed", "message": str(e)}), 500

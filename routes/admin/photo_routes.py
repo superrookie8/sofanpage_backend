@@ -39,10 +39,10 @@ def get_photo(photo_id):
         return jsonify({"status": "Failed", "message": str(e)}), 500
 
 @admin_photo_bp.route('/api/admin/get/photos', methods=['GET'])
-@jwt_required()
+# @jwt_required()
 def get_photos():
     try:
-        token = request.headers.get('Authorization').split()[1]
+        # token = request.headers.get('Authorization').split()[1]
 
         admin_photos = fs_admin.find()
         admin_photo_list = []
@@ -54,7 +54,8 @@ def get_photos():
                 "_id": str(photo._id),
                 "filename": photo.filename,
                 "base64": data_url,
-                "url": f"/api/admin/get/photo/{photo._id}?token={token}"
+                # "url": f"/api/admin/get/photo/{photo._id}?token={token}"
+                "url": f"/api/admin/get/photo/{photo._id}"
             })
 
         user_photos = fs_user.find()
@@ -67,7 +68,8 @@ def get_photos():
                 "_id": str(photo._id),
                 "filename": photo.filename,
                 "base64": data_url,
-                "url": f"/api/admin/get/photo/{photo._id}?token={token}"
+                # "url": f"/api/admin/get/photo/{photo._id}?token={token}"
+                "url": f"/api/admin/get/photo/{photo._id}"
             })
 
         return jsonify({"admin_photos": admin_photo_list, "user_photos": user_photo_list}), 200

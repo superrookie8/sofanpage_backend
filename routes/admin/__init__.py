@@ -8,6 +8,8 @@ from .schedule_routes import admin_schedule_bp
 from .guestbook_routes import admin_guestbook_bp
 from .event_routes import admin_event_bp
 
+
+
 admin_bp = Blueprint('admin', __name__)
 admin_bp.register_blueprint(admin_main_bp)
 admin_bp.register_blueprint(profile_bp)
