@@ -27,6 +27,13 @@ def get_total_pages(soup):
         return int(total_pages)
     return 1
 
+def should_crawl(db):
+    last_crawl = db['crawl_info'].find_one({'name': 'jumpball_last_crawl'})
+    if not last_crawl:
+        return True
+    last_crawl_date = last_crawl['date']
+    return datetime.now() - last_crawl_date > timedelta(days=30)
+
 # 크롤링 함수
 @newsjumpball_bp.route('/api/jumpball/search/', strict_slashes=False)
 def search_jumpball():
@@ -37,8 +44,9 @@ def search_jumpball():
     db = current_app.config['db']
     news_jumpball = db['news_jumpball']
 
-    # 강제 크롤링 수행 (기존 데이터와 관계없이)
-    print("Forcing new articles crawling...")
+    if should_crawl(db):
+
+        print("Performing monthly crawl...")
 
     # 2015년부터 현재까지의 기사를 가져오도록 설정
     start_year = 2015
@@ -55,6 +63,15 @@ def search_jumpball():
     if total_articles:
         news_jumpball.delete_many({})  # 기존 데이터 삭제
         news_jumpball.insert_many(total_articles)  # 새 데이터 저장
+
+        db['crawl_info'].update_one(
+            {'name': 'jumpball_last_crawl'},
+            {'$set': {'date': datetime.now()}},
+            upsert=True
+        )
+    else:
+        print("Using existing data from the last crawl.")
+    
 
     articles = list(news_jumpball.find({
         '$or': [

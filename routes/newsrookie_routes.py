@@ -31,6 +31,13 @@ def get_total_pages(soup):
         return int(total_pages)
     return 1
 
+def should_crawl(db):
+    crawl_info = db['crawl_info'].find_one({'name': 'rookie_last_crawl'})
+    if not crawl_info:
+        return True
+    last_crawl_date = crawl_info['date']
+    return datetime.now() - last_crawl_date > timedelta(days=30)
+
 
 # 크롤링 함수 수정
 def crawl_data(query):
@@ -40,6 +47,20 @@ def crawl_data(query):
 
     db = current_app.config['db']
     news_rookie = db['news_rookie']
+
+    if should_crawl(db):
+        print("Performing monthly crawl...")
+        new_articles = crawl_data(query)
+        if new_articles:
+            news_rookie.insert_many(new_articles)
+            db['crawl_info'].update_one(
+                {'name': 'rookie_last_crawl'},
+                {'$set': {'date': datetime.now()}},
+                upsert=True
+            )
+    else:
+        print("Using existing data from the last crawl.")
+
 
     # 기존에 수집된 링크들
     existing_links = set(article['link'] for article in news_rookie.find({}, {'link': 1}))
