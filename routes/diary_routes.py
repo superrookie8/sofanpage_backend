@@ -88,7 +88,6 @@ def post_diary():
 @diary_bp.route('/api/get_diary_personal', methods=['GET'])
 def get_diary_personal():
     try:
-        # 쿼리 매개변수로부터 사용자 이름, 페이지, 페이지 크기 가져오기
         page = int(request.args.get('page', 1))
         page_size = int(request.args.get('page_size', 10))
         skip = (page - 1) * page_size
@@ -97,8 +96,8 @@ def get_diary_personal():
         if not user:
             return jsonify({"error": "User parameter is required"}), 400
 
-        # MongoDB에서 해당 사용자의 일지들만 가져오기 (페이지네이션)
-        user_diaries = list(diaries.find({"name": user}).sort('date', -1).skip(skip).limit(page_size))
+        # saved_at 기준으로 정렬 변경 (-1은 내림차순, 즉 최신순)
+        user_diaries = list(diaries.find({"name": user}).sort('saved_at', -1).skip(skip).limit(page_size))
 
         # ObjectId를 문자열로 변환 (JSON 직렬화 가능하게) 및 이미지 처리
         for diary in user_diaries:
@@ -129,8 +128,8 @@ def get_diary_entries():
         page_size = int(request.args.get('page_size', 10))
         skip = (page - 1) * page_size
 
-        # MongoDB에서 모든 일지 가져오기 (페이지네이션)
-        all_diaries = list(diaries.find().skip(skip).sort('date', -1).limit(page_size))
+        # saved_at 기준으로 정렬 변경
+        all_diaries = list(diaries.find().sort('saved_at', -1).skip(skip).limit(page_size))
 
         for diary in all_diaries:
             diary['_id'] = str(diary['_id'])
