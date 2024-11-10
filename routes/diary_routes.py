@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, session, Flask
+from flask import Blueprint, request, jsonify, session, Flask, current_app
 from database import fs_diary, diaries
 from bson import ObjectId
 from gridfs import GridFS, errors as gridfs_errors
@@ -7,6 +7,7 @@ from flask_cors import CORS
 import base64
 from gridfs.errors import NoFile, GridFSError  # Add GridFSError import
 from flask_jwt_extended import jwt_required, get_jwt_identity  # Add this import
+import boto3
 
 # Blueprint 설정
 diary_bp = Blueprint('diary_bp', __name__)
@@ -285,3 +286,46 @@ def delete_diary():
         return jsonify({"message": "Diary entry deleted successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+
+@diary_bp.route('/api/test_s3_connection', methods=['GET'])
+def test_s3_connection():
+    try:
+        # S3 클라이언트 생성
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=current_app.config['AWS_ACCESS_KEY_ID'],
+            aws_secret_access_key=current_app.config['AWS_SECRET_ACCESS_KEY'],
+            region_name=current_app.config['AWS_S3_REGION']
+        )
+        
+        # 버킷 리스트 가져오기 시도
+        response = s3_client.list_buckets()
+        
+        # 설정된 버킷이 존재하는지 확인
+        buckets = [bucket['Name'] for bucket in response['Buckets']]
+        target_bucket = current_app.config['AWS_S3_BUCKET']
+        
+        if target_bucket in buckets:
+            return jsonify({
+                "status": "success",
+                "message": "Successfully connected to S3",
+                "bucket_exists": True,
+                "bucket_name": target_bucket,
+                "all_buckets": buckets
+            }), 200
+        else:
+            return jsonify({
+                "status": "warning",
+                "message": "Connected to S3, but target bucket not found",
+                "bucket_exists": False,
+                "bucket_name": target_bucket,
+                "all_buckets": buckets
+            }), 200
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to connect to S3: {str(e)}"
+        }), 500
