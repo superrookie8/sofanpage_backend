@@ -48,7 +48,7 @@ def search_jumpball():
             'link': article['link'],
             'summary': article['summary'],
             'image_url': article.get('image_url'),
-            'created_at': article['created_at'].strftime("%Y-%m-%d %H:%M:%S") if article.get('created_at') else None,
+            'created_at': article['created_at'],
             'keyword_count': article.get('keyword_count', 0)
         } for article in existing_articles
     ]
@@ -243,26 +243,95 @@ def crawl_specific_article(url):
 
 @newsjumpball_bp.route('/api/jumpball/add-article/', methods=['POST'])
 def add_specific_article():
-    url = request.json.get('url')
-    if not url:
-        return jsonify({'error': 'URL is required'}), 400
-        
-    db = current_app.config['db']
-    article = crawl_specific_article(url)
-    
-    if article:
+    try:
+        db = current_app.config['db']
         news_jumpball = db['news_jumpball']
-        if not news_jumpball.find_one({'link': url}):
-            news_jumpball.insert_one(article)
         
-        return jsonify({
-            'message': 'Article successfully added',
-            'article': {
-                'title': article['title'],
-                'link': article['link'],
-                'created_at': article['created_at'],
-                'keyword_count': article['keyword_count']
+        # 검색 결과 페이지 크롤��
+        search_url = "https://jumpball.co.kr/news/search.php?q=이소희&sfld=all&period=MONTH|12"
+        response = requests.get(search_url, headers={'User-Agent': 'Mozilla/5.0'})
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # 첫 번째 기사 찾기
+        article_item = soup.select_one('#listWrap .listPhoto')
+        if not article_item:
+            print("기사를 찾을 수 없음")
+            return jsonify({'error': 'No article found'}), 404
+            
+        # 제목과 링크 추출
+        title_tag = article_item.select_one('dt a')
+        if not title_tag:
+            return jsonify({'error': 'Title not found'}), 400
+            
+        title = title_tag.text.strip()
+        link = 'https://jumpball.co.kr' + title_tag['href']
+        
+        # 요약문 추출
+        summary_tag = article_item.select_one('dl dd.conts')
+        summary = summary_tag.text.strip() if summary_tag else ""
+        
+        # 이미지 URL 추출
+        img_tag = article_item.select_one('.img a')
+        image_url = None
+        if img_tag and 'style' in img_tag.attrs:
+            style = img_tag['style']
+            if 'url(' in style:
+                image_url = style.split("url('")[1].split("')")[0]
+        
+        # 기사 상세 페이지에서 날짜 추출
+        article_response = requests.get(link, headers={'User-Agent': 'Mozilla/5.0'})
+        article_soup = BeautifulSoup(article_response.content, 'html.parser')
+        
+        date_tag = article_soup.select_one('#main > div.viewTitle > dl > dd')
+        created_at = None
+        if date_tag:
+            date_text = date_tag.text.strip()
+            print(f"추출된 날짜 텍스트: {date_text}")
+            # "기사승인 : 2024-11-10 07:30:22" 형식에서 날짜 추출
+            pattern = r"기사승인 : (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"
+            match = re.search(pattern, date_text)
+            if match:
+                created_at = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
+                print(f"파싱된 날짜: {created_at}")
+        
+        # 본문에서 키워드 카운트
+        content_tag = article_soup.select_one('#articleBody')
+        keyword_count = content_tag.text.lower().count('이소희') if content_tag else 0
+        
+        if title and created_at:
+            article = {
+                'title': title,
+                'link': link,
+                'summary': summary,
+                'image_url': image_url,
+                'created_at': created_at,
+                'keyword_count': keyword_count
             }
-        })
-    else:
-        return jsonify({'error': 'Failed to add article'}), 400
+            
+            # 데이터베이스에 저장
+            result = news_jumpball.insert_one(article)
+            print(f"\n저장된 기사:")
+            print(f"- 제목: {title}")
+            print(f"- 날짜: {created_at}")
+            print(f"- 키워드 수: {keyword_count}")
+            
+            return jsonify({
+                'message': 'Article successfully added',
+                'article': {
+                    'title': title,
+                    'link': link,
+                    'created_at': created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    'summary': summary,
+                    'keyword_count': keyword_count,
+                    'image_url': image_url
+                }
+            })
+        else:
+            print("필수 데이터 누락")
+            print(f"제목 존재: {bool(title)}")
+            print(f"날짜 존재: {bool(created_at)}")
+            return jsonify({'error': 'Missing required data'}), 400
+            
+    except Exception as e:
+        print(f"에러 발생: {str(e)}")
+        return jsonify({'error': str(e)}), 500
