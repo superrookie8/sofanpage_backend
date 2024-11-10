@@ -39,43 +39,26 @@ def search_jumpball():
     if not query:
         return jsonify({'error': 'Query parameter is required'}), 400
 
-    try:
-        db = current_app.config['db']
-        print("\n=== MongoDB 연결 상태 ===")
-        print(f"DB 객체: {db}")
-        print(f"현재 데이터베이스: {db.name}")
-        print(f"컬렉션 목록: {db.list_collection_names()}")
-        
-        news_jumpball = db['news_jumpball']
-        total_docs = news_jumpball.count_documents({})
-        print(f"news_jumpball 컬렉션 문서 수: {total_docs}")
-        
-        # 최신 문서 순으로 정렬하여 첫 번째 문서 확인
-        latest_article = news_jumpball.find_one(
-            sort=[('created_at', -1)]  # -1은 내림차순(최신순)
-        )
-        if latest_article:
-            print("\n최신 문서 확인:")
-            print(f"- ID: {latest_article['_id']}")
-            print(f"- 제목: {latest_article.get('title', 'No title')}")
-            print(f"- 작성일: {latest_article.get('created_at')}")
-            
-            print("\n가장 오래된 문서 확인:")
-            oldest_article = news_jumpball.find_one(
-                sort=[('created_at', 1)]  # 1은 오름차순(과거순)
-            )
-            if oldest_article:
-                print(f"- ID: {oldest_article['_id']}")
-                print(f"- 제목: {oldest_article.get('title', 'No title')}")
-                print(f"- 작성일: {oldest_article.get('created_at')}")
-        else:
-            print("\n컬렉션이 비어있음")
+    db = current_app.config['db']
+    news_jumpball = db['news_jumpball']
 
-    except Exception as e:
-        print(f"\n!!! MongoDB 연결/쿼리 에러 !!!")
-        print(f"에러 내용: {str(e)}")
-        return jsonify({'error': 'Database error'}), 500
-
+    # 특정 기사 URL
+    specific_url = "https://jumpball.co.kr/news/newsview.php?ncode=1065539839641968"
+    
+    # 기사가 이미 DB에 있는지 확인
+    existing_article = news_jumpball.find_one({'link': specific_url})
+    
+    if not existing_article:  # 기사가 없을 때만 크롤링
+        print(f"\n새 기사 크롤링 시작: {specific_url}")
+        article = crawl_specific_article(specific_url)
+        
+        if article:
+            try:
+                news_jumpball.insert_one(article)
+                print("새 기사 저장 완료")
+            except Exception as e:
+                print(f"DB 저장 실패: {str(e)}")
+    
     # 검색 결과 반환
     existing_articles = list(news_jumpball.find({
         '$or': [
