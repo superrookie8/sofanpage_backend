@@ -55,32 +55,37 @@ def search_jumpball():
         print(f"에러 발생: {str(e)}")
         return jsonify({'error': 'Database error'}), 500
 
-def perform_crawl(query, db):
-    start_year = 2015
-    end_year = datetime.now().year
-    total_articles = []
+def get_latest_article_date(db):
     news_jumpball = db['news_jumpball']
+    latest_article = news_jumpball.find_one(
+        {},
+        sort=[('created_at', -1)]  # 날짜 내림차순 정렬
+    )
+    return latest_article['created_at'] if latest_article else None
 
-    print("\n=== 크롤링 및 데이터 정리 시작 ===")
+def crawl_data(query, db):
+    latest_date = get_latest_article_date(db)
+    print(f"\n=== 크롤링 시작 ===")
+    print(f"최신 기사 날짜: {latest_date}")
     
-    # 새로운 기사 크롤링
-    for year in range(start_year, end_year + 1):
-        print(f"\n{year}년도 기사 크롤링 중...")
-        new_articles = crawl_jumpball(query, year, db)
-        if new_articles:
-            # 새로운 기사들을 DB에 저장
-            for article in new_articles:
-                try:
-                    # 중복 체크 후 저장
-                    if not news_jumpball.find_one({'link': article['link']}):
-                        news_jumpball.insert_one(article)
-                        print(f"새 기사 저장됨: {article['title']}")
-                except Exception as e:
-                    print(f"기사 저장 중 에러 발생: {str(e)}")
-            total_articles.extend(new_articles)
-
-    print(f"\n크롤링 완료: 총 {len(total_articles)}개의 새로운 기사 발견")
-    return total_articles
+    news_jumpball = db['news_jumpball']
+    new_articles = []
+    
+    # 크롤링 로직
+    for item in crawl_articles(query):
+        if latest_date and item['created_at'] <= latest_date:
+            print(f"이미 저장된 기사 발견, 크롤링 중단: {item['title']}")
+            break
+            
+        if not news_jumpball.find_one({'link': item['link']}):
+            new_articles.append(item)
+            print(f"새 기사 발견: {item['title']} ({item['created_at']})")
+    
+    if new_articles:
+        news_jumpball.insert_many(new_articles)
+        print(f"\n{len(new_articles)}개의 새로운 기사 저장됨")
+    else:
+        print("\n새로운 기사가 없습니다.")
 
 def crawl_jumpball(query, year, db):
     base_url = 'https://jumpball.co.kr/news/search.php'
