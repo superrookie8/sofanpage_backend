@@ -4,7 +4,25 @@ from config import Config
 import gridfs
 
 ca = certifi.where()
-client = MongoClient(Config.MONGO_URI, tlsCAFile=certifi.where())
+# MongoDB 연결 설정 수정
+client = MongoClient(
+    Config.MONGO_URI,
+    tlsCAFile=certifi.where(),
+    tls=True,
+    serverSelectionTimeoutMS=30000,  # 타임아웃 시간 증가
+    connectTimeoutMS=20000,
+    socketTimeoutMS=20000,
+    maxPoolSize=50,  # 연결 풀 크기 설정
+    retryWrites=True
+)
+
+try:
+    # 연결 테스트
+    client.admin.command('ping')
+    print("MongoDB 연결 성공!")
+except Exception as e:
+    print(f"MongoDB 연결 실패: {e}")
+
 db = client.fanpage
 
 fs_admin = gridfs.GridFS(db, collection='admin_photo')
