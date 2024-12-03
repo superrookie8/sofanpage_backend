@@ -47,16 +47,10 @@ def crawl_data(query, db, is_first_run=False):
 
     news_rookie = db['news_rookie']
     
-    # 최신 기사 날짜 가져오기 (첫 실행이 아닐 경우에만)
-    latest_date = None if is_first_run else get_latest_article_date(db)
+    # 최신 기사 날짜 가져오기
+    latest_date = get_latest_article_date(db)
     print(f"\n=== 크롤링 시작 ===")
     print(f"최신 기사 날짜: {latest_date}")
-
-    # DB 초기화 (첫 실행시에만)
-    if is_first_run:
-        print("기존 DB 데이터 삭제 중...")
-        news_rookie.delete_many({})
-        print("DB 초기화 완료")
 
     response = requests.get(base_url, headers=headers, params={'sc_word': query, 'view_type': 'sm', 'page': 1})
     if response.status_code != 200:
@@ -116,7 +110,7 @@ def crawl_data(query, db, is_first_run=False):
                         continue
 
                     # 증분 업데이트 시 날짜 체크
-                    if not is_first_run and latest_date and created_at <= latest_date:
+                    if latest_date and created_at <= latest_date:
                         print(f"이미 저장된 기사 날짜 발견, 크롤링 중단: {title}")
                         should_continue = False
                         break
@@ -141,20 +135,17 @@ def crawl_data(query, db, is_first_run=False):
                 continue
 
     if new_articles:
-        # 벌크 작업으로 변경하여 중복 방지
-        operations = [
-            {
-                'replaceOne': {
-                    'filter': {'link': article['link']},
-                    'replacement': article,
-                    'upsert': True
-                }
-            }
-            for article in new_articles
-        ]
-        
-        result = news_rookie.bulk_write(operations, ordered=False)
-        print(f"\n총 {result.upserted_count}개의 새로운 기사 저장됨")
+        try:
+            # 새 기사만 저장 (중복 방지)
+            for article in new_articles:
+                news_rookie.update_one(
+                    {'link': article['link']},  # 링크로 중복 체크
+                    {'$setOnInsert': article},  # 없을 때만 삽입
+                    upsert=True
+                )
+            print(f"\n총 {len(new_articles)}개의 새로운 기사 처리됨")
+        except Exception as e:
+            print(f"저장 중 에러 발생: {str(e)}")
     else:
         print("\n새로운 기사가 없습니다.")
     
@@ -162,35 +153,10 @@ def crawl_data(query, db, is_first_run=False):
 
 @newsrookie_bp.route('/api/rookie/search/', strict_slashes=False)
 def search_rookie():
+    """기존 데이터 조회만 수행하는 엔드포인트"""
     try:
         db = current_app.config['db']
         news_rookie = db['news_rookie']
-
-        # 첫 실행 여부 확인
-        first_run = db['crawl_info'].find_one({'name': 'rookie_first_run'}) is None
-
-        if first_run:
-            print("\n=== 최초 실행: 전체 크롤링 시작 ===")
-            # 기존 데이터 전체 삭제
-            delete_result = news_rookie.delete_many({})
-            print(f"Deleted {delete_result.deleted_count} documents from news_rookie collection.")
-            # 처음부터 새로 크롤링
-            crawl_data("이소희", db, is_first_run=True)
-            # 첫 실행 표시 저장
-            db['crawl_info'].update_one(
-                {'name': 'rookie_first_run'},
-                {'$set': {'date': datetime.now()}},
-                upsert=True
-            )
-        elif should_crawl(db):
-            print("\n=== 증분 크롤링 시작 ===")
-            crawl_data("이소희", db, is_first_run=False)
-            
-        db['crawl_info'].update_one(
-            {'name': 'rookie_last_crawl'},
-            {'$set': {'date': datetime.now()}},
-            upsert=True
-        )
         
         # 저장된 모든 기사 최신순으로 반환
         articles = list(news_rookie.find().sort('created_at', -1))
@@ -210,4 +176,33 @@ def search_rookie():
 
     except Exception as e:
         print(f"Error in search_rookie: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@newsrookie_bp.route('/api/rookie/crawl/', methods=['POST'])
+def crawl_rookie():
+    """크롤링을 수행하는 별도 엔드포인트"""
+    try:
+        db = current_app.config['db']
+        
+        # 마지막 크롤링 시간 체크
+        if not should_crawl(db):
+            return jsonify({'message': '마지막 크롤링 후 5일이 지나지 않았습니다.'})
+
+        # 증분 크롤링 시작
+        print("\n=== 증분 크롤링 시작 ===")
+        new_articles = crawl_data("이소희", db)
+        
+        # 마지막 크롤링 시간 업데이트
+        db['crawl_info'].update_one(
+            {'name': 'rookie_last_crawl'},
+            {'$set': {'date': datetime.now()}},
+            upsert=True
+        )
+        
+        return jsonify({
+            'message': f'크롤링 완료: {len(new_articles)}개의 새로운 기사 처리됨'
+        })
+
+    except Exception as e:
+        print(f"Error in crawl_rookie: {str(e)}")
         return jsonify({'error': str(e)}), 500
