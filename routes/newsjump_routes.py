@@ -71,15 +71,19 @@ def crawl_data(query, db):
     news_jumpball = db['news_jumpball']
     new_articles = []
     
-    # 크롤링 로직
-    for item in crawl_articles(query):
-        if latest_date and item['created_at'] <= latest_date:
-            print(f"이미 저장된 기사 발견, 크롤링 중단: {item['title']}")
-            break
-            
-        if not news_jumpball.find_one({'link': item['link']}):
-            new_articles.append(item)
-            print(f"새 기사 발견: {item['title']} ({item['created_at']})")
+    # 현재 연도부터 2020년까지 크롤링
+    current_year = datetime.now().year
+    for year in range(current_year, 2019, -1):
+        articles = crawl_jumpball(query, year, db)
+        
+        for article in articles:
+            if latest_date and article['created_at'] <= latest_date:
+                print(f"이미 저장된 기사 발견, 크롤링 중단: {article['title']}")
+                break
+                
+            if not news_jumpball.find_one({'link': article['link']}):
+                new_articles.append(article)
+                print(f"새 기사 발견: {article['title']} ({article['created_at']})")
     
     if new_articles:
         news_jumpball.insert_many(new_articles)
