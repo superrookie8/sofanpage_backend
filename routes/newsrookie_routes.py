@@ -38,7 +38,7 @@ def should_crawl(db):
     if not crawl_info:
         return True
     last_crawl_date = crawl_info['date']
-    return datetime.now() - last_crawl_date > timedelta(days=5)
+    return datetime.now() - last_crawl_date > timedelta(days=1)
 
 def crawl_data(query, db, is_first_run=False):
     base_url = 'https://www.rookie.co.kr/news/articleList.html'
